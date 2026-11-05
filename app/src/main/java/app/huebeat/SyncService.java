@@ -16,6 +16,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioPlaybackCaptureConfiguration;
+import android.media.AudioPlaybackConfiguration;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
@@ -364,11 +365,25 @@ public class SyncService extends Service {
 
     private String silenceHint(int mode) {
         if (mode == Prefs.MODE_MIC) return "Not hearing anything. Is music playing nearby?";
-        if (mode == Prefs.MODE_APP) {
-            return "No sound from " + Prefs.get(this).appLabel()
-                    + ". Is it playing? Some apps block capture; try \"Phone audio\" or \"Microphone\".";
+        // Look at what is playing right now to tell "nothing plays" from "an app blocks capture".
+        int media = 0, blocked = 0;
+        try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            for (AudioPlaybackConfiguration pc : am.getActivePlaybackConfigurations()) {
+                AudioAttributes aa = pc.getAudioAttributes();
+                int u = aa.getUsage();
+                if (u == AudioAttributes.USAGE_MEDIA || u == AudioAttributes.USAGE_GAME || u == AudioAttributes.USAGE_UNKNOWN) {
+                    media++;
+                    if (aa.getAllowedCapturePolicy() != AudioAttributes.ALLOW_CAPTURE_BY_ALL) blocked++;
+                }
+            }
+        } catch (Exception ignored) {
         }
-        return "No sound captured. Is something playing? Some apps block capture; then try \"Microphone\".";
+        String who = mode == Prefs.MODE_APP ? Prefs.get(this).appLabel() : "the app that's playing";
+        if (media == 0) return "Nothing seems to be playing right now. Start some music.";
+        if (blocked > 0) return "Music is playing, but " + who + " doesn't allow other apps to capture its sound. Use \"Microphone\" for this app.";
+        return "Music is playing, but no sound reaches HueSoundCompanion. " + who.substring(0, 1).toUpperCase() + who.substring(1)
+                + " probably blocks capture. Use \"Microphone\" for this app.";
     }
 
     private static String friendly(Exception e) {
