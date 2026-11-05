@@ -8,7 +8,7 @@ import java.util.List;
  * palettes, then the user's own palettes.
  */
 public final class Palettes {
-    private static final String[] BUILT_IN_NAMES = {"Auto", "Sunset", "Ocean", "Forest", "Neon", "Fire", "Pastel"};
+    private static final String[] BUILT_IN_NAMES = {"Auto", "Sunset", "Ocean", "Forest", "Neon", "Fire", "Pastel", "Synthwave"};
 
     // RGB 0xRRGGBB, cycled through smoothly
     private static final int[][] BUILT_IN = {
@@ -18,7 +18,8 @@ public final class Palettes {
             {0x2EB82E, 0x9BE22E, 0x0F7A4A, 0xD4E157},          // Forest
             {0xFF00E6, 0x00F0FF, 0x7A00FF, 0x39FF14},          // Neon
             {0xFF2200, 0xFF7A00, 0xFFC300, 0xB30000},          // Fire
-            {0xFFB3C7, 0xB3D9FF, 0xD9B3FF, 0xB3FFD9, 0xFFE5B3} // Pastel
+            {0xFFB3C7, 0xB3D9FF, 0xD9B3FF, 0xB3FFD9, 0xFFE5B3}, // Pastel
+            {0xFF2A6D, 0xD300C5, 0x7A04EB, 0x05D9E8, 0xFF6C11}  // Synthwave: hot pink, magenta, violet, neon cyan, sunset orange
     };
 
     public static final int BUILT_IN_COUNT = BUILT_IN.length;

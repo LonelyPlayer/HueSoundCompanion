@@ -31,6 +31,12 @@ public final class Prefs {
         light.maxBrightness = sp.getFloat("maxBrightness", 1f);
         light.strobe = sp.getBoolean("strobe", false);
         loadCustomPalettes();
+        // New built-in palettes push the user's own ones back; keep the same one selected.
+        int oldBuiltIn = sp.getInt("builtInPalettes", 7);
+        if (oldBuiltIn != Palettes.BUILT_IN_COUNT) {
+            if (light.palette >= oldBuiltIn) light.palette += Palettes.BUILT_IN_COUNT - oldBuiltIn;
+            sp.edit().putInt("builtInPalettes", Palettes.BUILT_IN_COUNT).putInt("palette", light.palette).apply();
+        }
         if (light.palette >= Palettes.count()) light.palette = 0;
     }
 
