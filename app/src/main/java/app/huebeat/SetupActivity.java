@@ -135,9 +135,16 @@ public class SetupActivity extends Activity {
         startDiscovery();
         bg(() -> {
             try {
-                for (HueApi.Bridge b : HueApi.cloudDiscovery()) addCandidate(b.ip, false);
-            } catch (IOException ignored) {
+                List<HueApi.Bridge> cloud = HueApi.cloudDiscovery();
+                for (HueApi.Bridge b : cloud) addCandidate(b.ip, false);
+                if (cloud.isEmpty()) ui(() -> {
+                    if (step == 1 && found.isEmpty()) findStatus.setText("Searching… (Philips' online search found no bridge on this connection)");
+                });
+            } catch (IOException e) {
                 // mDNS or manual entry still work
+                ui(() -> {
+                    if (step == 1 && found.isEmpty()) findStatus.setText("Searching… (online search failed: " + e.getMessage() + ")");
+                });
             }
         });
         main.postDelayed(() -> {
@@ -171,7 +178,21 @@ public class SetupActivity extends Activity {
                     bridgeList.addView(c);
                 });
             } catch (IOException e) {
-                if (manual) ui(() -> findStatus.setText("No Hue bridge at " + ip + " (" + e.getMessage() + ")"));
+                final String why = e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : "");
+                if (manual) {
+                    ui(() -> findStatus.setText("Couldn't reach " + ip + " (" + why + ")"));
+                    return;
+                }
+                // Found by the cloud or mDNS but not reachable: still show it, with the reason,
+                // so pairing can be tried and the problem is visible.
+                HueApi.Bridge b = new HueApi.Bridge(ip);
+                ui(() -> {
+                    if (step != 1) return;
+                    findStatus.setText("Found a bridge, but the phone can't reach it");
+                    TextView c = card("Hue Bridge", ip + "\nNot reachable: " + why);
+                    c.setOnClickListener(v -> showLink(b));
+                    bridgeList.addView(c);
+                });
             }
         });
     }
@@ -181,6 +202,11 @@ public class SetupActivity extends Activity {
         discovery = new NsdManager.DiscoveryListener() {
             @Override
             public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+                main.post(() -> {
+                    if (step == 1 && found.isEmpty() && findStatus != null) {
+                        findStatus.setText("Local search unavailable (code " + errorCode + "). Enter the IP below.");
+                    }
+                });
             }
 
             @Override
