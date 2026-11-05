@@ -99,6 +99,10 @@ public final class Renderer {
         return out;
     }
 
+    // Intensity = how hard and how fast the light reacts.
+    //   low:  soft swells that fade out slowly over the whole beat, lights never go dark
+    //   high: sharp hits that drop off almost instantly to near-black between beats
+
     private void beatStyle(Features f, float dt, LightSettings s, boolean beat, boolean snare, float inten, float period) {
         if (beat) {
             beatIndex++;
@@ -106,40 +110,42 @@ public final class Renderer {
             boolean accentLeft = (beatIndex & 1) == 0;
             for (int i = 0; i < n; i++) {
                 boolean accent = n == 1 || leftSide[i] == accentLeft;
-                env[i] = Math.max(env[i], accent ? strength : strength * (0.35f + 0.35f * (1 - inten)));
+                env[i] = Math.max(env[i], accent ? strength : strength * lerp(0.85f, 0.25f, inten));
             }
         }
-        if (snare && inten > 0.25f && n > 0) {
+        if (snare && inten > 0.2f && n > 0) {
             int i = random.nextInt(n);
-            sparkle[i] = Math.max(sparkle[i], 0.35f + 0.5f * inten);
+            sparkle[i] = Math.max(sparkle[i], 0.3f + 0.6f * inten);
         }
-        float tau = clamp(period * (0.6f - 0.35f * inten), 0.08f, 0.5f);
-        float floor = 0.07f + 0.35f * f.level * (1f - 0.65f * inten);
+        float tau = lerp(Math.max(0.25f, period * 0.9f), 0.06f, (float) Math.pow(inten, 0.8));
+        float floor = lerp(0.45f, 0.02f, inten) * (0.4f + 0.6f * f.level);
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, tau);
-            sparkle[i] = decay(sparkle[i], dt, 0.07f);
+            sparkle[i] = decay(sparkle[i], dt, lerp(0.15f, 0.05f, inten));
             Palettes.color(s.palette, rampPos + loudPos + rank[i] * 0.15f, f.keyHue, 0.95f, tmp, 0);
             setTarget(i, tmp, floor + (1f - floor) * env[i], sparkle[i] * 0.75f);
         }
-        smooth(dt, 0.0f, 0.04f, s);
+        smooth(dt, lerp(0.06f, 0f, inten), lerp(0.12f, 0.02f, inten), s);
     }
 
     private void spectrum(Features f, double t, float dt, LightSettings s, boolean beat, float inten) {
         if (beat) for (int i = 0; i < n; i++) env[i] = 1f;
         float drift = (float) (t * 0.01);
+        float gamma = lerp(0.7f, 2.4f, inten);  // high = only the peaks light up
+        float floor = lerp(0.18f, 0.0f, inten);
         for (int i = 0; i < n; i++) {
             float bp = n > 1 ? rank[i] * (Features.BANDS - 1) : 1f;
             int b0 = (int) Math.floor(bp);
             int b1 = Math.min(Features.BANDS - 1, b0 + 1);
             float fr = bp - b0;
             float band = f.bands[b0] * (1 - fr) + f.bands[b1] * fr;
-            env[i] = decay(env[i], dt, 0.15f);
-            float v = 0.04f + 0.96f * (float) Math.pow(band, 1.0f + 0.6f * inten);
-            v += 0.25f * env[i] * (1f - rank[i]) * inten;
+            env[i] = decay(env[i], dt, lerp(0.3f, 0.08f, inten));
+            float v = floor + (1f - floor) * (float) Math.pow(band, gamma);
+            v += 0.3f * env[i] * (1f - rank[i]) * inten;
             Palettes.color(s.palette, drift + rampPos * 0.5f + loudPos + rank[i] * (0.25f + 0.35f * inten), f.keyHue, 0.95f, tmp, 0);
             setTarget(i, tmp, v, 0f);
         }
-        smooth(dt, 0.02f, 0.07f, s);
+        smooth(dt, lerp(0.12f, 0f, inten), lerp(0.4f, 0.03f, inten), s);
     }
 
     private void ambient(Features f, double t, float dt, LightSettings s, boolean beat, float inten) {
@@ -148,12 +154,13 @@ public final class Renderer {
             for (int i = 0; i < n; i++) env[i] = 1f;
         }
         for (int i = 0; i < n; i++) {
-            env[i] = decay(env[i], dt, 0.6f);
+            env[i] = decay(env[i], dt, lerp(1.0f, 0.3f, inten));
             float pos = 0.12f * (float) Math.sin(t * 0.15 + rank[i] * 1.3) + rampPos + loudPos * 0.6f;
             Palettes.color(s.palette, pos + posOffset[i] * 0.5f, f.keyHue, 0.75f + 0.2f * f.tonality, tmp, 0);
-            setTarget(i, tmp, 0.35f + 0.5f * ambientLevel + 0.2f * env[i] * inten, 0f);
+            float base = lerp(0.5f, 0.25f, inten);
+            setTarget(i, tmp, base + lerp(0.3f, 0.5f, inten) * ambientLevel + lerp(0.05f, 0.4f, inten) * env[i], 0f);
         }
-        smooth(dt, 0.6f, 0.9f, s);
+        smooth(dt, lerp(1.2f, 0.2f, inten), lerp(1.6f, 0.4f, inten), s);
     }
 
     private void party(Features f, float dt, LightSettings s, boolean beat, boolean snare, float inten, float period) {
@@ -174,15 +181,20 @@ public final class Renderer {
             }
         }
         strobe = decay(strobe, dt, 0.045f);
-        float tau = clamp(period * (0.45f - 0.25f * inten), 0.06f, 0.35f);
+        float tau = lerp(Math.max(0.2f, period * 0.7f), 0.045f, inten);
+        float floor = lerp(0.25f, 0.0f, inten);
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, tau);
             sparkle[i] = decay(sparkle[i], dt, 0.06f);
             Palettes.color(s.palette, posOffset[i] + loudPos, f.keyHue, 1f, tmp, 0);
             float w = Math.max(sparkle[i] * 0.85f, strobe);
-            setTarget(i, tmp, 0.02f + 0.98f * Math.max(env[i], strobe), w);
+            setTarget(i, tmp, floor + (1f - floor) * Math.max(env[i], strobe), w);
         }
-        smooth(dt, 0.0f, 0.03f, s);
+        smooth(dt, 0.0f, lerp(0.08f, 0.015f, inten), s);
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * clamp(t, 0f, 1f);
     }
 
     /** color (full brightness) * v, then mixed toward white by w. */

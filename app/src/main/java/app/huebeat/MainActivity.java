@@ -41,6 +41,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private PowerButton power;
+    private LevelMeter meter;
     private TextView status, hint, appRow, footer, delayLabel;
     private SeekBar delayBar;
     private LinearLayout appRowBox, strobeRow;
@@ -89,7 +90,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
         // header
         LinearLayout header = Ui.row(this);
-        TextView title = Ui.text(this, "HueBeat", 26, Ui.TEXT, true);
+        TextView title = Ui.text(this, "HueSoundCompanion", 22, Ui.TEXT, true);
         header.addView(title, Ui.lp(0, Ui.WRAP, 1));
         TextView setup = Ui.text(this, "Setup", 14, Ui.SUB, true);
         setup.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 12), Ui.dp(this, 8));
@@ -129,6 +130,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
         status = Ui.text(this, "", 16, Ui.TEXT, true);
         status.setGravity(Gravity.CENTER);
         root.addView(status, Ui.lp(Ui.MATCH, Ui.WRAP));
+        meter = new LevelMeter(this);
+        LinearLayout.LayoutParams mlp = Ui.margins(Ui.lp(Ui.dp(this, 160), Ui.dp(this, 6)), 0, Ui.dp(this, 10), 0, Ui.dp(this, 2));
+        mlp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(meter, mlp);
         hint = Ui.text(this, "", 13, Ui.SUB, false);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(Ui.dp(this, 12), Ui.dp(this, 4), Ui.dp(this, 12), 0);
@@ -293,6 +298,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
         delayBar.setVisibility(mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
         updateDelayLabel();
 
+        meter.setVisibility(SyncState.status == SyncState.Status.RUNNING ? View.VISIBLE : View.INVISIBLE);
+        meter.invalidate();
         switch (SyncState.status) {
             case RUNNING:
                 status.setTextColor(Ui.TEXT);
@@ -430,7 +437,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             startFlow();
         } else {
             SyncState.set(SyncState.Status.ERROR,
-                    "HueBeat needs the audio permission to hear the music. Android files phone-audio capture under it too.");
+                    "HueSoundCompanion needs the audio permission to hear the music. Android files phone-audio capture under it too.");
         }
     }
 

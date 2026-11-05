@@ -172,7 +172,7 @@ public class SyncService extends Service {
 
             rec = createRecorder(mode, mp, prefs);
             final AudioRecord frec = rec;
-            final Analyzer analyzer = new Analyzer(SAMPLE_RATE);
+            final Analyzer analyzer = new Analyzer(SAMPLE_RATE, mode != Prefs.MODE_MIC);
             rec.startRecording();
             audioThread = new Thread(() -> {
                 short[] buf = new short[960];
@@ -396,7 +396,7 @@ public class SyncService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle("HueBeat")
+                .setContentTitle("HueSoundCompanion")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)

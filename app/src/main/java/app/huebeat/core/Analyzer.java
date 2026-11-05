@@ -37,7 +37,7 @@ public final class Analyzer {
     private final int[] bandLo = new int[Features.BANDS], bandHi = new int[Features.BANDS];
     private final float[] bandPeak = new float[Features.BANDS];
     private final float[] bandSmooth = new float[Features.BANDS];
-    private float levelPeak = 1e-3f, levelSmooth = 0f;
+    private float levelPeak = 1e-5f, levelSmooth = 0f;
 
     private final OnsetDetector kick = new OnsetDetector(1.45f, 0.28f);
     private final OnsetDetector snare = new OnsetDetector(1.6f, 0.11f);
@@ -55,8 +55,22 @@ public final class Analyzer {
     private final Features[] history = new Features[HISTORY];
     private int historyPos = 0, historyCount = 0;
 
+    private final float silenceDb, levelFloor, bandFloor;
+
     public Analyzer(int sampleRate) {
+        this(sampleRate, false);
+    }
+
+    /**
+     * @param digitalSource true for captured phone audio: it can be very quiet (low media
+     *                      volume is applied digitally) but has no background noise, so the
+     *                      silence gate and gain floors can go much lower than for a microphone.
+     */
+    public Analyzer(int sampleRate, boolean digitalSource) {
         this.sampleRate = sampleRate;
+        silenceDb = digitalSource ? -85f : -58f;
+        levelFloor = digitalSource ? 1e-5f : 1e-3f;
+        bandFloor = digitalSource ? 2e-6f : 2e-4f;
         float s = 0;
         for (float w : win) s += w;
         winSum = s;
@@ -64,7 +78,7 @@ public final class Analyzer {
         for (int b = 0; b < Features.BANDS; b++) {
             bandLo[b] = Math.max(1, Math.round(BAND_EDGES[b] / binHz));
             bandHi[b] = Math.max(bandLo[b] + 1, Math.min(N / 2, Math.round(BAND_EDGES[b + 1] / binHz)));
-            bandPeak[b] = 1e-4f;
+            bandPeak[b] = 1e-6f;
         }
         kickLo = Math.max(1, Math.round(35 / binHz));
         kickHi = Math.round(180 / binHz) + 1;
@@ -114,9 +128,9 @@ public final class Analyzer {
         }
         float rms = (float) Math.sqrt(sq / HOP);
         float db = 20f * (float) Math.log10(rms + 1e-9);
-        if (db < -58f) silentHops++; else silentHops = 0;
+        if (db < silenceDb) silentHops++; else silentHops = 0;
         boolean silent = silentHops > 25;
-        cur.inputMeter = clamp01((db + 60f) / 60f);
+        cur.inputMeter = clamp01((db - silenceDb) / -silenceDb);
 
         // --- spectrum
         for (int i = 0; i < N; i++) {
@@ -125,10 +139,12 @@ public final class Analyzer {
         }
         fft.transform();
         float scale = 2f / winSum;
+        // onset detection works on volume-normalised magnitudes, so it behaves the same at any volume
+        float onsetGain = 30f / Math.max(levelPeak, levelFloor);
         for (int k = 0; k < N / 2; k++) {
             float m = (float) Math.sqrt(fft.re[k] * fft.re[k] + fft.im[k] * fft.im[k]) * scale;
             mag[k] = m;
-            logMag[k] = (float) Math.log1p(1000f * m);
+            logMag[k] = (float) Math.log1p(onsetGain * m);
         }
 
         // --- bands with automatic gain
@@ -136,14 +152,14 @@ public final class Analyzer {
             double p = 0;
             for (int k = bandLo[b]; k < bandHi[b]; k++) p += mag[k] * mag[k];
             float e = (float) Math.sqrt(p / (bandHi[b] - bandLo[b]));
-            bandPeak[b] = Math.max(e, Math.max(bandPeak[b] * 0.997f, 2e-4f));
+            bandPeak[b] = Math.max(e, Math.max(bandPeak[b] * 0.997f, bandFloor));
             float norm = (float) Math.pow(e / bandPeak[b], 1.4);
             if (silent) norm = 0f;
             float a = norm > bandSmooth[b] ? 0.65f : 0.18f;
             bandSmooth[b] += (norm - bandSmooth[b]) * a;
             cur.bands[b] = bandSmooth[b];
         }
-        levelPeak = Math.max(rms, Math.max(levelPeak * 0.997f, 1e-3f));
+        levelPeak = Math.max(rms, Math.max(levelPeak * 0.997f, levelFloor));
         float lvl = silent ? 0f : (float) Math.pow(rms / levelPeak, 1.2);
         levelSmooth += (lvl - levelSmooth) * (lvl > levelSmooth ? 0.5f : 0.12f);
         cur.level = levelSmooth;

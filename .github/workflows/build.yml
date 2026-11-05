@@ -23,18 +23,18 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk HueBeat.apk
+          cp app/build/outputs/apk/release/app-release.apk HueSoundCompanion.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HueBeat-apk
-          path: HueBeat.apk
+          name: HueSoundCompanion-apk
+          path: HueSoundCompanion.apk
 
       # Publishes the APK as a GitHub release so you can download it directly on your phone
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: HueBeat build ${{ github.run_number }}
-          files: HueBeat.apk
+          name: HueSoundCompanion build ${{ github.run_number }}
+          files: HueSoundCompanion.apk
           make_latest: true

@@ -286,7 +286,7 @@ public class SetupActivity extends Activity {
         step = 2;
         stopDiscovery();
         clear("Press the link button", "Press the big round button on top of \"" + bridge.name
-                + "\". HueBeat connects automatically within a few seconds.");
+                + "\". HueSoundCompanion connects automatically within a few seconds.");
         ProgressBar pb = new ProgressBar(this);
         pb.setIndeterminateTintList(ColorStateList.valueOf(Ui.ACCENT));
         content.addView(pb, Ui.margins(Ui.lp(Ui.MATCH, Ui.dp(this, 64)), 0, Ui.dp(this, 10), 0, Ui.dp(this, 10)));

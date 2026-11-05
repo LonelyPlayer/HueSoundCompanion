@@ -1,4 +1,4 @@
-# HueBeat
+# HueSoundCompanion
 
 Music sync for Philips Hue that listens to **everything your phone plays** (speaker or Bluetooth), **one app**, or the **microphone**, and streams colors to your lights through the Hue Entertainment API. No Sync Box, no cloud, no extra libraries.
 
@@ -16,6 +16,7 @@ Music sync for Philips Hue that listens to **everything your phone plays** (spea
   - "harmony color": the dominant notes are placed on the circle of fifths, so colors follow the song's key and chord changes
 - **Styles:** Beat, Spectrum (each light gets a frequency range by its position in the room), Ambient, Party (optional strobe).
 - **Colors:** Auto (from the music), 6 built-in palettes, and your own palettes (tap **+ New**; long-press one of yours to edit or delete it). Every palette is a looping color ramp: beats move a playhead along it (gliding in time with the tempo) and loudness pushes it further, so drops land on different colors. **Color movement** sets how far.
+- **Intensity** sets how hard and fast the lights react: low = soft swells that fade over the whole beat, high = sharp hits that drop to near-black between beats.
 - **Light delay** slider, remembered separately for the phone speaker and Bluetooth (Bluetooth audio usually arrives 150–300 ms late).
 
 ## Install on your phone (no PC needed)
@@ -24,7 +25,7 @@ The APK is built automatically by GitHub Actions:
 
 1. Put this project in a GitHub repository (branch `main`).
 2. Every push runs the **Build APK** workflow. It takes about 3–5 minutes.
-3. On your phone, open the repository's **Releases** page and download `HueBeat.apk` from the newest "HueBeat build".
+3. On your phone, open the repository's **Releases** page and download `HueSoundCompanion.apk` from the newest "HueSoundCompanion build".
 4. Open the file. Android will ask you to allow installing apps from your browser or Files app; allow it once.
 
 You can also start a build by hand: **Actions › Build APK › Run workflow**.
@@ -35,17 +36,17 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## First start
 
-1. HueBeat finds your bridge on the Wi-Fi (or type its IP).
-2. Press the round link button on the bridge. HueBeat connects automatically.
+1. HueSoundCompanion finds your bridge on the Wi-Fi (or type its IP).
+2. Press the round link button on the bridge. HueSoundCompanion connects automatically.
 3. Pick your **entertainment area**. If you don't have one, create it in the Hue app under *Settings › Entertainment areas* with your color lights.
-4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; HueBeat records nothing and keeps no audio, it only measures it.
+4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; HueSoundCompanion records nothing and keeps no audio, it only measures it.
 
 ## Good to know
 
-- **Some apps block audio capture** (often apps with DRM-protected streams). If the lights stay dim and HueBeat says "No sound captured", switch to **Microphone**.
-- While HueBeat streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
+- **Some apps block audio capture** (often apps with DRM-protected streams). If the lights stay dim and HueSoundCompanion says "No sound captured", switch to **Microphone**.
+- While HueSoundCompanion streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
 - Only one entertainment area can stream per bridge at a time; a running Hue Sync session will be replaced.
-- The bridge is contacted over your local network only. HueBeat accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).
+- The bridge is contacted over your local network only. HueSoundCompanion accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).
 - **Photosensitivity:** Party style with strobe enabled produces fast flashes.
 
 ## How it works (for tinkering)
