@@ -14,11 +14,21 @@ android {
         versionName '1.0'
     }
 
+    // A fixed key kept in the repo, so every cloud build can be installed as an update
+    // over the previous one. (It only identifies this sideloaded app; it is not a secret.)
+    signingConfigs {
+        sideload {
+            storeFile file('huebeat-release.jks')
+            storePassword 'huebeat'
+            keyAlias 'huebeat'
+            keyPassword 'huebeat'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            // signed with the debug key so it can be sideloaded without extra setup
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.sideload
         }
     }
 
