@@ -43,7 +43,7 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## Good to know
 
-- **Some apps block audio capture** (often apps with DRM-protected streams). If the lights stay dim and HueSoundCompanion says "No sound captured", switch to **Microphone**.
+- **Some apps block audio capture** (Spotify and SoundCloud, for example). HueSoundCompanion notices when music plays but nothing arrives, and switches automatically to Android's music visualizer, which still sees the overall output. It's a bit coarser (about 20 snapshots per second instead of the full audio) and may not work on every phone or while the screen is off. If neither works, use **Microphone**.
 - While HueSoundCompanion streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
 - Only one entertainment area can stream per bridge at a time; a running Hue Sync session will be replaced.
 - The bridge is contacted over your local network only. HueSoundCompanion accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).

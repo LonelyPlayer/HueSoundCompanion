@@ -166,6 +166,7 @@ public class SyncService extends Service {
         AudioRecord rec = null;
         DtlsPskClient dtls = null;
         Thread audioThread = null;
+        VisualizerSource viz = null;
         boolean streamingStarted = false;
         try {
             SyncState.set(SyncState.Status.STARTING, "Connecting to bridge…");
@@ -200,12 +201,23 @@ public class SyncService extends Service {
             updateNotification(prefs);
 
             long start = System.nanoTime(), last = start, nextFrame = start, lastCheck = start;
-            long silentSince = start;
+            long silentSince = start, captureSilentSince = start, captureLoudSince = 0, vizRetryAt = start;
             int failures = 0;
+            boolean useViz = false;
+            String vizError = null;
+            String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
             while (running) {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
+
+                Features cap = analyzer.latest();
+                boolean captureSilent = cap == null || cap.silent;
+                if (captureSilent) captureLoudSince = 0;
+                else {
+                    captureSilentSince = now;
+                    if (captureLoudSince == 0) captureLoudSince = now;
+                }
 
                 if (now - lastCheck > 1_000_000_000L) {
                     lastCheck = now;
@@ -214,11 +226,32 @@ public class SyncService extends Service {
                         SyncState.bluetooth = b;
                         SyncState.notifyListeners();
                     }
+                    // Fallback: nothing arrives although music plays -> the app blocks capture.
+                    // Switch on Android's visualizer, which still sees the overall output.
+                    if (mode != Prefs.MODE_MIC && viz == null && now >= vizRetryAt
+                            && now - captureSilentSince > 2_000_000_000L && mediaPlaying(am)) {
+                        VisualizerSource v = new VisualizerSource();
+                        if (v.start()) {
+                            viz = v;
+                            vizError = null;
+                        } else {
+                            vizError = v.error;
+                            vizRetryAt = now + 30_000_000_000L;
+                        }
+                    }
+                    // Direct capture works again for a while: the visualizer is no longer needed.
+                    if (viz != null && captureLoudSince != 0 && now - captureLoudSince > 10_000_000_000L) {
+                        viz.stop();
+                        viz = null;
+                    }
                 }
+                Features vz = viz != null ? viz.analyzer.latest() : null;
+                useViz = captureSilent && vz != null && !vz.silent;
+                Analyzer active = useViz ? viz.analyzer : analyzer;
                 ls.delayMs = mode == Prefs.MODE_MIC ? 0
                         : (SyncState.bluetooth ? prefs.delayBluetooth() : prefs.delaySpeaker());
 
-                Features f = analyzer.at(now - ls.delayMs * 1_000_000L);
+                Features f = active.at(now - ls.delayMs * 1_000_000L);
                 float[] rgb = renderer.render(f, (now - start) / 1e9, dt, ls);
                 try {
                     dtls.send(stream.build(ch.ids, rgb));
@@ -238,11 +271,18 @@ public class SyncService extends Service {
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
-                Features latest = analyzer.latest();
+                Features latest = active.latest();
                 SyncState.meter = latest != null ? latest.inputMeter : 0f;
                 SyncState.bpm = latest != null ? latest.bpm : 0f;
-                if (latest == null || latest.silent) {
-                    if (now - silentSince > 6_000_000_000L) SyncState.setHint(silenceHint(mode));
+                if (useViz) {
+                    silentSince = now;
+                    SyncState.setHint(blocker + " blocks direct capture, so the lights follow Android's music visualizer instead (a bit coarser).");
+                } else if (latest == null || latest.silent) {
+                    if (now - silentSince > 6_000_000_000L) {
+                        String h = silenceHint(mode);
+                        if (vizError != null) h += " (Android's visualizer fallback isn't available: " + vizError + ")";
+                        SyncState.setHint(h);
+                    }
                 } else {
                     silentSince = now;
                     SyncState.setHint("");
@@ -268,6 +308,7 @@ public class SyncService extends Service {
             if (running) main.post(() -> shutdown(msg));
         } finally {
             running = false;
+            if (viz != null) viz.stop();
             if (dtls != null) dtls.close();
             if (audioThread != null) {
                 try {
@@ -359,6 +400,17 @@ public class SyncService extends Service {
                     || t == AudioDeviceInfo.TYPE_BLE_SPEAKER || t == AudioDeviceInfo.TYPE_HEARING_AID) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean mediaPlaying(AudioManager am) {
+        try {
+            for (AudioPlaybackConfiguration pc : am.getActivePlaybackConfigurations()) {
+                int u = pc.getAudioAttributes().getUsage();
+                if (u == AudioAttributes.USAGE_MEDIA || u == AudioAttributes.USAGE_GAME || u == AudioAttributes.USAGE_UNKNOWN) return true;
+            }
+        } catch (Exception ignored) {
         }
         return false;
     }

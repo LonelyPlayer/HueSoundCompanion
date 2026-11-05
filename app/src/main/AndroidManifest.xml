@@ -10,6 +10,8 @@
 
     <!-- hear the music (microphone, and required by Android for phone-audio capture too) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- needed for Android's visualizer fallback on the whole phone output -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- keep syncing with the screen off -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
