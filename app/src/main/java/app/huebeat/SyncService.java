@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 
 import app.huebeat.core.Analyzer;
+import app.huebeat.core.CameraColors;
 import app.huebeat.core.DtlsPskClient;
 import app.huebeat.core.Features;
 import app.huebeat.core.HueStream;
@@ -211,6 +212,18 @@ public class SyncService extends Service {
             boolean useViz = false;
             String vizError = null;
             String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
+            // TV camera: where each light sits on the screen, and what the lights showed recently
+            int nch = ch.ids.length;
+            float[] camU = new float[nch], camV = new float[nch], camOut = new float[3 * nch], calRgb = new float[3 * nch];
+            for (int i = 0; i < nch; i++) {
+                camU[i] = Math.max(0f, Math.min(1f, (ch.x[i] + 1f) / 2f));
+                camV[i] = Math.max(0f, Math.min(1f, 1f - (ch.z[i] + 1f) / 2f));
+            }
+            long[] lightT = new long[128];
+            float[] lightC = new float[3 * 128];
+            int lightPos = 0;
+            CameraColors.Calibrator calibrator = null;
+            long lastCalFrame = 0;
             while (running) {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
@@ -234,7 +247,7 @@ public class SyncService extends Service {
                     // Screen colors: start sampling the screen the first time they're wanted.
                     // (A capture session can create its screen mirror only once, so it then stays on.)
                     boolean wantScreen = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
-                    if (wantScreen && screen == null && mp != null && screenError == null) {
+                    if (wantScreen && screen == null && mp != null && screenError == null && !CameraFeed.fresh(now)) {
                         ScreenSource sc = new ScreenSource(this, ch.x, ch.z);
                         if (sc.start(mp)) screen = sc;
                         else screenError = sc.error;
@@ -264,9 +277,77 @@ public class SyncService extends Service {
                 ls.delayMs = mode == Prefs.MODE_MIC ? 0
                         : (SyncState.bluetooth ? prefs.delayBluetooth() : prefs.delaySpeaker());
 
-                renderer.setScreenColors(screen != null ? screen.colors() : null);
-                Features f = active.at(now - ls.delayMs * 1_000_000L);
-                float[] rgb = renderer.render(f, (now - start) / 1e9, dt, ls);
+                boolean camera = CameraFeed.fresh(now);
+                float[] camGrid = CameraFeed.grid;
+                if (camera && camGrid != null) {
+                    // the lights' own glow on the screen, as it looked latency ms ago
+                    long want = now - CameraFeed.colors.latencyMs() * 1_000_000L;
+                    float[] past = null;
+                    for (int k = 1; k <= lightT.length; k++) {
+                        int idx = (lightPos - k + lightT.length) % lightT.length;
+                        if (lightT[idx] == 0) break;
+                        if (lightT[idx] <= want) {
+                            past = new float[]{lightC[3 * idx], lightC[3 * idx + 1], lightC[3 * idx + 2]};
+                            break;
+                        }
+                    }
+                    CameraFeed.colors.compute(camGrid, past, camU, camV, camOut);
+                    renderer.setScreenColors(camOut);
+                } else {
+                    renderer.setScreenColors(screen != null ? screen.colors() : null);
+                }
+
+                // room-light calibration requested from the camera screen
+                if (CameraFeed.calibrateRequested) {
+                    CameraFeed.calibrateRequested = false;
+                    if (camera) {
+                        calibrator = new CameraColors.Calibrator(CameraFeed.GW, CameraFeed.GH, now);
+                        lastCalFrame = 0;
+                    } else {
+                        CameraFeed.calibrationStatus = "Calibration needs the TV camera screen open.";
+                    }
+                }
+                float[] rgb;
+                if (calibrator != null) {
+                    float[] lc = calibrator.lightColor(now);
+                    if (!camera) {
+                        calibrator = null;
+                        CameraFeed.calibrationStatus = "Calibration stopped: the camera lost the TV.";
+                        rgb = renderer.render(active.at(now), (now - start) / 1e9, dt, ls);
+                    } else if (lc == null) {
+                        if (calibrator.finish()) CameraFeed.colors.setCalibration(calibrator.model, calibrator.latencyMs);
+                        CameraFeed.calibrationStatus = calibrator.result;
+                        calibrator = null;
+                        rgb = renderer.render(active.at(now), (now - start) / 1e9, dt, ls);
+                    } else {
+                        long gt = CameraFeed.gridNanos;
+                        if (gt != lastCalFrame && camGrid != null) {
+                            calibrator.addFrame(gt, camGrid);
+                            lastCalFrame = gt;
+                        }
+                        for (int i = 0; i < nch; i++) {
+                            calRgb[3 * i] = lc[0];
+                            calRgb[3 * i + 1] = lc[1];
+                            calRgb[3 * i + 2] = lc[2];
+                        }
+                        rgb = calRgb;
+                    }
+                } else {
+                    Features f = active.at(now - ls.delayMs * 1_000_000L);
+                    rgb = renderer.render(f, (now - start) / 1e9, dt, ls);
+                }
+                // remember what the lights showed (average), for removing their glow from the camera image
+                float sr = 0f, sg = 0f, sb = 0f;
+                for (int i = 0; i < nch; i++) {
+                    sr += rgb[3 * i];
+                    sg += rgb[3 * i + 1];
+                    sb += rgb[3 * i + 2];
+                }
+                lightT[lightPos] = now;
+                lightC[3 * lightPos] = sr / nch;
+                lightC[3 * lightPos + 1] = sg / nch;
+                lightC[3 * lightPos + 2] = sb / nch;
+                lightPos = (lightPos + 1) % lightT.length;
                 try {
                     dtls.send(stream.build(ch.ids, rgb));
                     failures = 0;
@@ -289,7 +370,10 @@ public class SyncService extends Service {
                 SyncState.meter = latest != null ? latest.inputMeter : 0f;
                 SyncState.bpm = latest != null ? latest.bpm : 0f;
                 boolean screenWanted = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
-                if (screenWanted && screen == null && (mp == null || screenError != null)) {
+                if (camera) {
+                    silentSince = now;
+                    SyncState.setHint("Colors from the TV camera.");
+                } else if (screenWanted && screen == null && (mp == null || screenError != null)) {
                     SyncState.setHint(mp == null ? "Screen colors need screen sharing. Turn sync off and on again."
                             : "Screen colors aren't available: " + screenError);
                 } else if (ls.style == LightSettings.STYLE_SCREEN) {

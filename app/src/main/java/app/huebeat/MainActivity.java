@@ -258,6 +258,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             refresh();
         });
         palettesRow.addView(screenChip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
+        TextView tvChip = Ui.chip(this, "TV camera");
+        tvChip.setOnClickListener(v -> startActivity(new Intent(this, CameraActivity.class)));
+        palettesRow.addView(tvChip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
         for (int i = 0; i < Palettes.count(); i++) {
             final int p = i;
             TextView chip = Ui.chip(this, Palettes.name(i));
