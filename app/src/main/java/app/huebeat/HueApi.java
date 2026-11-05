@@ -51,7 +51,7 @@ public final class HueApi {
 
     public static final class Channels {
         public int[] ids;
-        public float[] x, y;
+        public float[] x, y, z;
     }
 
     /** Thrown while the link button has not been pressed yet. */
@@ -239,12 +239,14 @@ public final class HueApi {
             c.ids = new int[n];
             c.x = new float[n];
             c.y = new float[n];
+            c.z = new float[n];
             for (int i = 0; i < n; i++) {
                 JSONObject one = ch.getJSONObject(i);
                 c.ids[i] = one.getInt("channel_id");
                 JSONObject pos = one.optJSONObject("position");
                 c.x[i] = pos != null ? (float) pos.optDouble("x", 0) : 0f;
                 c.y[i] = pos != null ? (float) pos.optDouble("y", 0) : 0f;
+                c.z[i] = pos != null ? (float) pos.optDouble("z", 0) : 0f;
             }
             if (n == 0) throw new IOException("This entertainment area has no lights.");
             return c;

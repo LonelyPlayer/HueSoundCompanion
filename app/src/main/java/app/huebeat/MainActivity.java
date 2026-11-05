@@ -36,6 +36,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_SETUP = 4;
     private static final int REQ_EDIT_PALETTE = 5;
     private LinearLayout palettesRow;
+    private TextView screenChip;
+    private boolean sessionHasScreen = false;
 
     private Prefs prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -141,6 +143,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
         // style
         root.addView(section("Style"));
+        HorizontalScrollView styleScroll = new HorizontalScrollView(this);
+        styleScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout styles = Ui.row(this);
         for (int i = 0; i < LightSettings.STYLE_NAMES.length; i++) {
             final int s = i;
@@ -148,12 +152,14 @@ public class MainActivity extends Activity implements SyncState.Listener {
             chip.setOnClickListener(v -> {
                 prefs.light.style = s;
                 prefs.saveLight();
+                if (s == LightSettings.STYLE_SCREEN) ensureScreenCapture();
                 refresh();
             });
             styleChips.add(chip);
-            styles.addView(chip, Ui.margins(Ui.lp(0, Ui.WRAP, 1), i == 0 ? 0 : Ui.dp(this, 3), 0, Ui.dp(this, 3), 0));
+            styles.addView(chip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
         }
-        root.addView(styles);
+        styleScroll.addView(styles);
+        root.addView(styleScroll);
 
         // palette
         root.addView(section("Colors"));
@@ -244,6 +250,14 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private void rebuildPalettes() {
         palettesRow.removeAllViews();
         paletteChips.clear();
+        screenChip = Ui.chip(this, "Screen");
+        screenChip.setOnClickListener(v -> {
+            prefs.light.screenColors = true;
+            prefs.saveLight();
+            ensureScreenCapture();
+            refresh();
+        });
+        palettesRow.addView(screenChip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
         for (int i = 0; i < Palettes.count(); i++) {
             final int p = i;
             TextView chip = Ui.chip(this, Palettes.name(i));
@@ -251,6 +265,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             chip.setCompoundDrawablesRelative(swatch(i), null, null, null);
             chip.setOnClickListener(v -> {
                 prefs.light.palette = p;
+                prefs.light.screenColors = false;
                 prefs.saveLight();
                 refresh();
             });
@@ -289,7 +304,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
         int mode = prefs.mode();
         for (int i = 0; i < modeChips.size(); i++) Ui.setChipSelected(modeChips.get(i), i == mode);
         for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), i == prefs.light.style);
-        for (int i = 0; i < paletteChips.size(); i++) Ui.setChipSelected(paletteChips.get(i), i == prefs.light.palette);
+        boolean screenCols = prefs.light.screenColors;
+        boolean screenStyle = prefs.light.style == LightSettings.STYLE_SCREEN;
+        Ui.setChipSelected(screenChip, screenCols || screenStyle);
+        for (int i = 0; i < paletteChips.size(); i++) {
+            Ui.setChipSelected(paletteChips.get(i), !screenCols && !screenStyle && i == prefs.light.palette);
+        }
         appRowBox.setVisibility(mode == Prefs.MODE_APP ? View.VISIBLE : View.GONE);
         String label = prefs.appLabel();
         appRow.setText(label == null ? "Choose the app to follow" : "Following: " + label);
@@ -403,7 +423,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             requestPermissions(need.toArray(new String[0]), REQ_PERMS);
             return;
         }
-        if (prefs.mode() == Prefs.MODE_MIC) {
+        if (prefs.mode() == Prefs.MODE_MIC && !screenNeeded()) {
             launchService(0, null);
         } else {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
@@ -411,6 +431,18 @@ public class MainActivity extends Activity implements SyncState.Listener {
                     ? mpm.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
                     : mpm.createScreenCaptureIntent();
             startActivityForResult(consent, REQ_PROJECTION);
+        }
+    }
+
+    private boolean screenNeeded() {
+        return prefs.light.screenColors || prefs.light.style == LightSettings.STYLE_SCREEN;
+    }
+
+    /** Microphone sessions run without screen sharing; restart with it when screen colors are wanted. */
+    private void ensureScreenCapture() {
+        if (SyncState.isActive() && !sessionHasScreen) {
+            SyncService.stop(this);
+            main.postDelayed(this::startFlow, 700);
         }
     }
 
@@ -422,7 +454,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         if (data != null) {
             i.putExtra(SyncService.EXTRA_RESULT_CODE, resultCode);
             i.putExtra(SyncService.EXTRA_RESULT_DATA, data);
+            i.putExtra(SyncService.EXTRA_SCREEN, true);
         }
+        sessionHasScreen = data != null;
         try {
             startForegroundService(i);
         } catch (Exception e) {

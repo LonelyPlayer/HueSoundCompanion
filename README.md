@@ -14,7 +14,8 @@ Music sync for Philips Hue that listens to **everything your phone plays** (spea
   - live tempo (BPM), so flashes fade in time with the song
   - 6 frequency bands with automatic gain, so quiet and loud songs both work
   - "harmony color": the dominant notes are placed on the circle of fifths, so colors follow the song's key and chord changes
-- **Styles:** Beat, Spectrum (each light gets a frequency range by its position in the room), Ambient, Party (optional strobe).
+- **Styles:** Beat, Spectrum (each light gets a frequency range by its position in the room), Ambient, Party (optional strobe), and **Screen** (ambilight: the lights take the colors of the screen area at their position, no music needed).
+- **Screen colors:** the **Screen** chip in the Colors row keeps any music style's rhythm but takes the colors from the phone screen. Protected video (Netflix etc.) shows as black to apps, so it can't drive the lights.
 - **Colors:** Auto (from the music), 7 built-in palettes (incl. Synthwave), and your own palettes (tap **+ New**; long-press one of yours to edit or delete it). Every palette is a looping color ramp: beats move a playhead along it (gliding in time with the tempo) and loudness pushes it further, so drops land on different colors. **Color movement** sets how far.
 - **Intensity** sets how hard and fast the lights react: low = soft swells that fade over the whole beat, high = sharp hits that drop to near-black between beats.
 - **Light delay** slider, remembered separately for the phone speaker and Bluetooth (Bluetooth audio usually arrives 150–300 ms late).

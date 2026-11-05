@@ -30,6 +30,7 @@ public final class Prefs {
         light.colorMove = sp.getFloat("colorMove", 0.5f);
         light.maxBrightness = sp.getFloat("maxBrightness", 1f);
         light.strobe = sp.getBoolean("strobe", false);
+        light.screenColors = sp.getBoolean("screenColors", false);
         loadCustomPalettes();
         // New built-in palettes push the user's own ones back; keep the same one selected.
         int oldBuiltIn = sp.getInt("builtInPalettes", 7);
@@ -117,6 +118,7 @@ public final class Prefs {
                 .putFloat("colorMove", light.colorMove)
                 .putFloat("maxBrightness", light.maxBrightness)
                 .putBoolean("strobe", light.strobe)
+                .putBoolean("screenColors", light.screenColors)
                 .apply();
     }
 

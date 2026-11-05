@@ -41,6 +41,56 @@ public final class Renderer {
         for (int i = 0; i < n; i++) posOffset[i] = rank[i] * 0.3f;
     }
 
+    private volatile float[] screen;
+
+    /** Latest per-channel screen colors (rgb 0..1), or null when the screen isn't captured. */
+    public void setScreenColors(float[] rgb) {
+        screen = rgb != null && rgb.length >= 3 * n ? rgb : null;
+    }
+
+    /** Color for channel i at full brightness: from the screen if enabled, else from the palette. */
+    private void color(int i, LightSettings s, float pos, float keyHue, float sat) {
+        float[] sc = screen;
+        if ((s.screenColors || s.style == LightSettings.STYLE_SCREEN) && sc != null) {
+            float r = sc[3 * i], g = sc[3 * i + 1], b = sc[3 * i + 2];
+            float m = Math.max(r, Math.max(g, b));
+            if (m > 0.04f) {
+                tmp[0] = r / m;
+                tmp[1] = g / m;
+                tmp[2] = b / m;
+            } else {
+                tmp[0] = tmp[1] = tmp[2] = 0.6f; // dark screen: neutral
+            }
+            return;
+        }
+        Palettes.color(s.palette, pos, keyHue, sat, tmp, 0);
+    }
+
+    /** Pure screen sync (ambilight): follows the screen's colors and brightness, ignores the music. */
+    private void screenStyle(float dt, LightSettings s) {
+        float[] sc = screen;
+        float inten = s.intensity;
+        for (int i = 0; i < n; i++) {
+            if (sc == null) {
+                setTarget(i, new float[]{1f, 0.8f, 0.6f}, 0.05f, 0f);
+                continue;
+            }
+            float r = sc[3 * i], g = sc[3 * i + 1], b = sc[3 * i + 2];
+            float m = Math.max(r, Math.max(g, b));
+            float v = (float) Math.pow(m, 0.75);          // lift dark scenes a little
+            float boost = lerp(1.0f, 1.8f, inten);        // more vivid colors at higher intensity
+            float avg = (r + g + b) / 3f;
+            float[] c = new float[3];
+            float[] src = {r, g, b};
+            for (int k = 0; k < 3; k++) {
+                float x = avg + (src[k] - avg) * boost;
+                c[k] = m > 0.02f ? clamp(x / m, 0f, 1f) : 0f;
+            }
+            setTarget(i, c, Math.max(0.02f, v), 0f);
+        }
+        smooth(dt, lerp(0.35f, 0.04f, inten), lerp(0.5f, 0.08f, inten), s);
+    }
+
     /** Average output color (for the UI), 0..1. */
     public float[] meanColor() {
         return mean;
@@ -53,6 +103,10 @@ public final class Renderer {
      * @return rgb triples, 0..1, one per channel (live array, do not keep)
      */
     public float[] render(Features f, double t, float dt, LightSettings s) {
+        if (s.style == LightSettings.STYLE_SCREEN) {
+            screenStyle(dt, s);
+            return out;
+        }
         if (f == null) f = new Features();
         float inten = s.intensity;
         if (!initialized) {
@@ -83,7 +137,7 @@ public final class Renderer {
             for (int i = 0; i < n; i++) {
                 env[i] = decay(env[i], dt, 0.3f);
                 sparkle[i] = 0f;
-                Palettes.color(s.palette, posOffset[i], f.keyHue, 0.8f, tmp, 0);
+                color(i, s, posOffset[i], f.keyHue, 0.8f);
                 setTarget(i, tmp, 0.05f, 0f);
             }
             smooth(dt, 0.8f, 0.8f, s);
@@ -122,7 +176,7 @@ public final class Renderer {
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, tau);
             sparkle[i] = decay(sparkle[i], dt, lerp(0.15f, 0.05f, inten));
-            Palettes.color(s.palette, rampPos + loudPos + rank[i] * 0.15f, f.keyHue, 0.95f, tmp, 0);
+            color(i, s, rampPos + loudPos + rank[i] * 0.15f, f.keyHue, 0.95f);
             setTarget(i, tmp, floor + (1f - floor) * env[i], sparkle[i] * 0.75f);
         }
         smooth(dt, lerp(0.06f, 0f, inten), lerp(0.12f, 0.02f, inten), s);
@@ -142,7 +196,7 @@ public final class Renderer {
             env[i] = decay(env[i], dt, lerp(0.3f, 0.08f, inten));
             float v = floor + (1f - floor) * (float) Math.pow(band, gamma);
             v += 0.3f * env[i] * (1f - rank[i]) * inten;
-            Palettes.color(s.palette, drift + rampPos * 0.5f + loudPos + rank[i] * (0.25f + 0.35f * inten), f.keyHue, 0.95f, tmp, 0);
+            color(i, s, drift + rampPos * 0.5f + loudPos + rank[i] * (0.25f + 0.35f * inten), f.keyHue, 0.95f);
             setTarget(i, tmp, v, 0f);
         }
         smooth(dt, lerp(0.12f, 0f, inten), lerp(0.4f, 0.03f, inten), s);
@@ -156,7 +210,7 @@ public final class Renderer {
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, lerp(1.0f, 0.3f, inten));
             float pos = 0.12f * (float) Math.sin(t * 0.15 + rank[i] * 1.3) + rampPos + loudPos * 0.6f;
-            Palettes.color(s.palette, pos + posOffset[i] * 0.5f, f.keyHue, 0.75f + 0.2f * f.tonality, tmp, 0);
+            color(i, s, pos + posOffset[i] * 0.5f, f.keyHue, 0.75f + 0.2f * f.tonality);
             float base = lerp(0.5f, 0.25f, inten);
             setTarget(i, tmp, base + lerp(0.3f, 0.5f, inten) * ambientLevel + lerp(0.05f, 0.4f, inten) * env[i], 0f);
         }
@@ -186,7 +240,7 @@ public final class Renderer {
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, tau);
             sparkle[i] = decay(sparkle[i], dt, 0.06f);
-            Palettes.color(s.palette, posOffset[i] + loudPos, f.keyHue, 1f, tmp, 0);
+            color(i, s, posOffset[i] + loudPos, f.keyHue, 1f);
             float w = Math.max(sparkle[i] * 0.85f, strobe);
             setTarget(i, tmp, floor + (1f - floor) * Math.max(env[i], strobe), w);
         }

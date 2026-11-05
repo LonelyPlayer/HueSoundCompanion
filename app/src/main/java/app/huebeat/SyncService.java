@@ -45,6 +45,8 @@ public class SyncService extends Service {
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_RESULT_CODE = "resultCode";
     public static final String EXTRA_RESULT_DATA = "resultData";
+    /** The screen is needed (screen colors / Screen style), so capture consent was asked even for the microphone. */
+    public static final String EXTRA_SCREEN = "screen";
 
     private static final String CHANNEL = "sync";
     private static final int NOTIFICATION_ID = 1;
@@ -75,8 +77,9 @@ public class SyncService extends Service {
             return START_NOT_STICKY;
         }
         int mode = intent.getIntExtra(EXTRA_MODE, Prefs.MODE_OUTPUT);
+        boolean wantsProjection = mode != Prefs.MODE_MIC || intent.getBooleanExtra(EXTRA_SCREEN, false);
         int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
-        if (mode != Prefs.MODE_MIC) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
+        if (wantsProjection) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
         try {
             startForeground(NOTIFICATION_ID, buildNotification("Starting light sync…"), type);
         } catch (Exception e) {
@@ -88,7 +91,7 @@ public class SyncService extends Service {
         if (running) stopEngine();
 
         MediaProjection mp = null;
-        if (mode != Prefs.MODE_MIC) {
+        if (wantsProjection) {
             Intent data = intent.getParcelableExtra(EXTRA_RESULT_DATA);
             int code = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             if (data == null) {
@@ -167,6 +170,8 @@ public class SyncService extends Service {
         DtlsPskClient dtls = null;
         Thread audioThread = null;
         VisualizerSource viz = null;
+        ScreenSource screen = null;
+        String screenError = null;
         boolean streamingStarted = false;
         try {
             SyncState.set(SyncState.Status.STARTING, "Connecting to bridge…");
@@ -226,6 +231,14 @@ public class SyncService extends Service {
                         SyncState.bluetooth = b;
                         SyncState.notifyListeners();
                     }
+                    // Screen colors: start sampling the screen the first time they're wanted.
+                    // (A capture session can create its screen mirror only once, so it then stays on.)
+                    boolean wantScreen = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
+                    if (wantScreen && screen == null && mp != null && screenError == null) {
+                        ScreenSource sc = new ScreenSource(this, ch.x, ch.z);
+                        if (sc.start(mp)) screen = sc;
+                        else screenError = sc.error;
+                    }
                     // Fallback: nothing arrives although music plays -> the app blocks capture.
                     // Switch on Android's visualizer, which still sees the overall output.
                     if (mode != Prefs.MODE_MIC && viz == null && now >= vizRetryAt
@@ -251,6 +264,7 @@ public class SyncService extends Service {
                 ls.delayMs = mode == Prefs.MODE_MIC ? 0
                         : (SyncState.bluetooth ? prefs.delayBluetooth() : prefs.delaySpeaker());
 
+                renderer.setScreenColors(screen != null ? screen.colors() : null);
                 Features f = active.at(now - ls.delayMs * 1_000_000L);
                 float[] rgb = renderer.render(f, (now - start) / 1e9, dt, ls);
                 try {
@@ -274,7 +288,14 @@ public class SyncService extends Service {
                 Features latest = active.latest();
                 SyncState.meter = latest != null ? latest.inputMeter : 0f;
                 SyncState.bpm = latest != null ? latest.bpm : 0f;
-                if (useViz) {
+                boolean screenWanted = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
+                if (screenWanted && screen == null && (mp == null || screenError != null)) {
+                    SyncState.setHint(mp == null ? "Screen colors need screen sharing. Turn sync off and on again."
+                            : "Screen colors aren't available: " + screenError);
+                } else if (ls.style == LightSettings.STYLE_SCREEN) {
+                    silentSince = now;
+                    SyncState.setHint("Following the screen. Protected videos (Netflix etc.) show as black.");
+                } else if (useViz) {
                     silentSince = now;
                     SyncState.setHint(blocker + " blocks direct capture, so the lights follow Android's music visualizer instead (a bit coarser).");
                 } else if (latest == null || latest.silent) {
@@ -309,6 +330,7 @@ public class SyncService extends Service {
         } finally {
             running = false;
             if (viz != null) viz.stop();
+            if (screen != null) screen.stop();
             if (dtls != null) dtls.close();
             if (audioThread != null) {
                 try {
