@@ -18,7 +18,9 @@ final class VisualizerSource {
     final Analyzer analyzer = new Analyzer(48000, true);
     private HandlerThread thread;
     private Visualizer viz;
-    private volatile float lastRms = 0f;
+    private volatile float lastRms = 0f, lastScale = 1f;
+    private boolean measuring = false;
+    private final Visualizer.MeasurementPeakRms meas = new Visualizer.MeasurementPeakRms();
     private float[] mags = new float[0];
     String error = null;
 
@@ -33,7 +35,10 @@ final class VisualizerSource {
                 viz.setEnabled(false);
                 int[] range = Visualizer.getCaptureSizeRange();
                 viz.setCaptureSize(Math.min(1024, range[1]));
+                // Normalized data keeps full 8-bit detail at any volume, but flattens loudness.
+                // The real loudness is measured separately and put back (see scale below).
                 viz.setScalingMode(Visualizer.SCALING_MODE_NORMALIZED);
+                measuring = viz.setMeasurementMode(Visualizer.MEASUREMENT_MODE_PEAK_RMS) == Visualizer.SUCCESS;
                 viz.setDataCaptureListener(new Visualizer.OnDataCaptureListener() {
                     @Override
                     public void onWaveFormDataCapture(Visualizer v, byte[] w, int samplingRate) {
@@ -42,7 +47,20 @@ final class VisualizerSource {
                             int x = (b & 0xFF) - 128;
                             sq += x * x;
                         }
-                        lastRms = (float) Math.sqrt(sq / Math.max(1, w.length)) / 128f;
+                        float normRms = (float) Math.sqrt(sq / Math.max(1, w.length)) / 128f;
+                        float scale = 1f;
+                        if (measuring && normRms > 1e-4f) {
+                            try {
+                                v.getMeasurementPeakRms(meas);
+                                // millibels as played -> linear; restores verse/chorus/drop dynamics
+                                float realRms = (float) Math.pow(10, meas.mRms / 2000.0);
+                                scale = realRms / normRms;
+                            } catch (Throwable t) {
+                                measuring = false;
+                            }
+                        }
+                        lastScale = scale;
+                        lastRms = normRms * scale;
                     }
 
                     @Override
@@ -52,8 +70,9 @@ final class VisualizerSource {
                         mags[0] = Math.abs(fft[0]) / 128f;
                         for (int k = 1; k < n; k++) {
                             float re = fft[2 * k], im = fft[2 * k + 1];
-                            mags[k] = (float) Math.sqrt(re * re + im * im) / 128f;
+                            mags[k] = (float) Math.sqrt(re * re + im * im) / 128f * lastScale;
                         }
+                        mags[0] *= lastScale;
                         float binHz = (samplingRate / 1000f) / fft.length;
                         analyzer.pushSpectrum(mags, n, binHz, lastRms, System.nanoTime());
                     }
