@@ -36,11 +36,15 @@ final class Strip {
                 .put("strobeAmount", (double) strobeAmount);
     }
 
-    /** Builds the network output for this strip with its effect settings. */
-    app.huebeat.core.StripOutput output() throws java.io.IOException {
-        app.huebeat.core.StripOutput so = new app.huebeat.core.StripOutput(name, java.net.InetAddress.getByName(ip),
-                protocol, leds, universe, mirror, reverse, brightness);
+    /** Everything that needs a new network output when it changes. */
+    String layoutKey() {
+        return ip + "|" + protocol + "|" + leds + "|" + universe + "|" + mirror + "|" + reverse;
+    }
+
+    /** Copies the visual settings onto a running output (takes effect on the next frame). */
+    void applyLive(app.huebeat.core.StripOutput so) {
         so.palette = palette;
+        so.brightness = brightness;
         so.effect.effect = effect;
         so.effect.speed = speed;
         so.effect.strobeTrigger = strobeTrigger;
@@ -48,6 +52,13 @@ final class Strip {
         so.effect.strobeLength = strobeLength;
         so.effect.strobeCover = strobeCover;
         so.effect.strobeAmount = strobeAmount;
+    }
+
+    /** Builds the network output for this strip with its effect settings. */
+    app.huebeat.core.StripOutput output() throws java.io.IOException {
+        app.huebeat.core.StripOutput so = new app.huebeat.core.StripOutput(name, java.net.InetAddress.getByName(ip),
+                protocol, leds, universe, mirror, reverse, brightness);
+        applyLive(so);
         return so;
     }
 

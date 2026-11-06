@@ -28,6 +28,7 @@ import java.util.List;
 
 import app.huebeat.core.LightSettings;
 import app.huebeat.core.Palettes;
+import app.huebeat.core.StripEffect;
 
 public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_PERMS = 1;
@@ -144,7 +145,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
         root.addView(hint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 18)));
 
         // style
-        root.addView(section("Style"));
+        LinearLayout look = collapsible(root, "Look", "open_look", true);
+        look.addView(section("Style"));
         HorizontalScrollView styleScroll = new HorizontalScrollView(this);
         styleScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout styles = Ui.row(this);
@@ -161,40 +163,33 @@ public class MainActivity extends Activity implements SyncState.Listener {
             styles.addView(chip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
         }
         styleScroll.addView(styles);
-        root.addView(styleScroll);
+        look.addView(styleScroll);
 
         // palette
-        root.addView(section("Colors"));
+        look.addView(section("Colors"));
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
         palettesRow = Ui.row(this);
         hs.addView(palettesRow);
-        root.addView(hs);
+        look.addView(hs);
         rebuildPalettes();
 
         // sliders
-        root.addView(section("Intensity"));
-        root.addView(slider(Math.round(prefs.light.intensity * 100), 100, v -> {
+        look.addView(section("Intensity"));
+        look.addView(slider(Math.round(prefs.light.intensity * 100), 100, v -> {
             prefs.light.intensity = v / 100f;
             prefs.saveLight();
         }));
-        root.addView(section("Color movement"));
-        root.addView(slider(Math.round(prefs.light.colorMove * 100), 100, v -> {
+        look.addView(section("Color movement"));
+        look.addView(slider(Math.round(prefs.light.colorMove * 100), 100, v -> {
             prefs.light.colorMove = v / 100f;
             prefs.saveLight();
         }));
-        root.addView(section("Max brightness"));
-        root.addView(slider(Math.round(prefs.light.maxBrightness * 100), 100, v -> {
+        look.addView(section("Max brightness"));
+        look.addView(slider(Math.round(prefs.light.maxBrightness * 100), 100, v -> {
             prefs.light.maxBrightness = Math.max(0.05f, v / 100f);
             prefs.saveLight();
         }));
-        delayLabel = section("Light delay");
-        root.addView(delayLabel);
-        delayBar = slider(0, 50, v -> {
-            prefs.setDelay(currentBluetooth(), v * 10);
-            updateDelayLabel();
-        });
-        root.addView(delayBar);
 
         strobeRow = Ui.row(this);
         TextView strobeText = Ui.text(this, "Strobe on snares (Party)", 15, Ui.TEXT, false);
@@ -206,12 +201,20 @@ public class MainActivity extends Activity implements SyncState.Listener {
             prefs.saveLight();
         });
         strobeRow.addView(strobe);
-        root.addView(strobeRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
+        look.addView(strobeRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
 
-        root.addView(section("LED strips"));
+        LinearLayout stripsSection = collapsible(root, "LED strips", "open_strips", true);
         stripsBox = Ui.column(this);
-        root.addView(stripsBox);
+        stripsSection.addView(stripsBox);
         rebuildStrips();
+
+        delayLabel = section("Light delay");
+        root.addView(delayLabel);
+        delayBar = slider(0, 50, v -> {
+            prefs.setDelay(currentBluetooth(), v * 10);
+            updateDelayLabel();
+        });
+        root.addView(delayBar);
 
         footer = Ui.text(this, "", 13, Ui.SUB, false);
         footer.setGravity(Gravity.CENTER);
@@ -254,38 +257,162 @@ public class MainActivity extends Activity implements SyncState.Listener {
         return s;
     }
 
+    /** A section with a header that folds its content in and out (state is remembered). */
+    private LinearLayout collapsible(LinearLayout parent, String title, String key, boolean defOpen) {
+        android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        boolean open = ui.getBoolean(key, defOpen);
+        LinearLayout head = Ui.row(this);
+        TextView t = Ui.text(this, title.toUpperCase(), 13, Ui.TEXT, true);
+        t.setLetterSpacing(0.08f);
+        head.addView(t, Ui.lp(0, Ui.WRAP, 1));
+        TextView chev = Ui.text(this, open ? "▾" : "▸", 20, Ui.SUB, true);
+        head.addView(chev);
+        head.setPadding(0, Ui.dp(this, 20), Ui.dp(this, 4), Ui.dp(this, 6));
+        head.setClickable(true);
+        LinearLayout body = Ui.column(this);
+        body.setVisibility(open ? View.VISIBLE : View.GONE);
+        head.setOnClickListener(v -> {
+            boolean o = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(o ? View.VISIBLE : View.GONE);
+            chev.setText(o ? "▾" : "▸");
+            ui.edit().putBoolean(key, o).apply();
+        });
+        parent.addView(head, Ui.lp(Ui.MATCH, Ui.WRAP));
+        View line = new View(this);
+        line.setBackgroundColor(Ui.LINE);
+        parent.addView(line, Ui.lp(Ui.MATCH, Ui.dp(this, 1)));
+        parent.addView(body, Ui.lp(Ui.MATCH, Ui.WRAP));
+        return body;
+    }
+
+    private static final int[] STROBE_COLORS = {0xFFFFFF, 0xFF0000, 0x0040FF, 0x7A00FF, 0xFFA000, 0x00FF40, 0xFF00C8, 0x00E5FF};
+    private static final String[] STROBE_COLOR_NAMES = {"White", "Red", "Blue", "UV", "Amber", "Green", "Pink", "Cyan"};
+    private List<Strip> stripList;
+
+    private static int strobeColorIndex(int c) {
+        for (int i = 0; i < STROBE_COLORS.length; i++) if (STROBE_COLORS[i] == c) return i;
+        return 0;
+    }
+
+    /** Saves the strips; a running sync picks the change up on its next frame. */
+    private void saveStrips() {
+        prefs.saveStrips(stripList);
+    }
+
     private void rebuildStrips() {
         stripsBox.removeAllViews();
-        List<Strip> all = prefs.strips();
-        for (int i = 0; i < all.size(); i++) {
+        stripList = prefs.strips();
+        android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        for (int i = 0; i < stripList.size(); i++) {
             final int idx = i;
-            Strip st = all.get(i);
-            LinearLayout r = Ui.row(this);
-            int p = Ui.dp(this, 12);
-            r.setPadding(Ui.dp(this, 14), p, Ui.dp(this, 8), p);
-            Ui.clickable(r, Ui.CARD, Ui.dp(this, 14));
-            TextView t = Ui.text(this, st.name + "\n" + st.leds + " LEDs · " + st.ip, 15, Ui.TEXT, true);
+            final Strip st = stripList.get(i);
+            LinearLayout card = Ui.column(this);
+            card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
+            int p = Ui.dp(this, 14);
+            card.setPadding(p, Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10));
+
+            // header: name, on/off, settings
+            LinearLayout head = Ui.row(this);
+            final String key = "open_strip_" + st.ip + "_" + idx;
+            boolean open = ui.getBoolean(key, false);
+            TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
+            chev.setPadding(0, 0, Ui.dp(this, 10), 0);
+            head.addView(chev);
+            TextView t = Ui.text(this, st.name + "\n" + st.leds + " LEDs · " + StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)], 15, Ui.TEXT, true);
             t.setLineSpacing(0, 1.15f);
-            r.addView(t, Ui.lp(0, Ui.WRAP, 1));
+            head.addView(t, Ui.lp(0, Ui.WRAP, 1));
+            TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
+            gear.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
+            gear.setContentDescription("Connection settings");
+            gear.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
+                    .putExtra(StripSetupActivity.EXTRA_INDEX, idx), REQ_STRIP));
+            head.addView(gear);
             Switch on = new Switch(this);
             on.setChecked(st.enabled);
             on.setOnCheckedChangeListener((bv, checked) -> {
-                List<Strip> l = prefs.strips();
-                if (idx < l.size()) {
-                    l.get(idx).enabled = checked;
-                    prefs.saveStrips(l);
-                }
-                restartIfRunning();
+                st.enabled = checked;
+                saveStrips();
                 refresh();
             });
-            r.addView(on);
-            r.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
-                    .putExtra(StripSetupActivity.EXTRA_INDEX, idx), REQ_STRIP));
-            stripsBox.addView(r, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+            head.addView(on);
+            card.addView(head);
+
+            // body: everything visual, changes apply live
+            LinearLayout body = Ui.column(this);
+            body.setPadding(0, 0, Ui.dp(this, 6), Ui.dp(this, 4));
+            body.setVisibility(open ? View.VISIBLE : View.GONE);
+            head.setClickable(true);
+            head.setOnClickListener(v -> {
+                boolean o = body.getVisibility() != View.VISIBLE;
+                body.setVisibility(o ? View.VISIBLE : View.GONE);
+                chev.setText(o ? "▾" : "▸");
+                ui.edit().putBoolean(key, o).apply();
+            });
+            body.addView(Ui.label(this, "Effect"));
+            body.addView(Ui.chipRow(this, StripEffect.NAMES, () -> st.effect, v -> {
+                st.effect = v;
+                saveStrips();
+                t.setText(st.name + "\n" + st.leds + " LEDs · " + StripEffect.NAMES[v]);
+            }));
+            body.addView(Ui.label(this, "Speed"));
+            body.addView(Ui.slider(this, st.speed, v -> {
+                st.speed = v;
+                saveStrips();
+            }));
+            body.addView(Ui.label(this, "Colors"));
+            String[] pal = new String[Palettes.count() + 1];
+            pal[0] = "Same as lights";
+            for (int k = 0; k < Palettes.count(); k++) pal[k + 1] = Palettes.name(k);
+            body.addView(Ui.chipRow(this, pal, () -> st.palette + 1, v -> {
+                st.palette = v - 1;
+                saveStrips();
+            }));
+            body.addView(Ui.label(this, "Brightness"));
+            body.addView(Ui.slider(this, st.brightness, v -> {
+                st.brightness = Math.max(0.03f, v);
+                saveStrips();
+            }));
+
+            body.addView(Ui.label(this, "Strobe overlay"));
+            TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
+            body.addView(sh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+            LinearLayout strobeBox = Ui.column(this);
+            body.addView(Ui.chipRow(this, StripEffect.STROBE_TRIGGERS, () -> st.strobeTrigger, v -> {
+                st.strobeTrigger = v;
+                saveStrips();
+                strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+            }));
+            strobeBox.addView(Ui.label(this, "Strobe color"));
+            strobeBox.addView(Ui.chipRow(this, STROBE_COLOR_NAMES, () -> strobeColorIndex(st.strobeColor), v -> {
+                st.strobeColor = STROBE_COLORS[v];
+                saveStrips();
+            }));
+            strobeBox.addView(Ui.label(this, "Flash length"));
+            strobeBox.addView(Ui.slider(this, st.strobeLength, v -> {
+                st.strobeLength = v;
+                saveStrips();
+            }));
+            strobeBox.addView(Ui.label(this, "Flash strength"));
+            strobeBox.addView(Ui.slider(this, st.strobeAmount, v -> {
+                st.strobeAmount = Math.max(0.1f, v);
+                saveStrips();
+            }));
+            strobeBox.addView(Ui.label(this, "Where it flashes"));
+            strobeBox.addView(Ui.chipRow(this, StripEffect.STROBE_COVERS, () -> st.strobeCover, v -> {
+                st.strobeCover = v;
+                saveStrips();
+            }));
+            TextView warn = Ui.text(this, "Fast flashing lights can trigger seizures in people with photosensitive epilepsy.", 12, Ui.SUB, false);
+            strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            strobeBox.setVisibility(st.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+            body.addView(strobeBox);
+            card.addView(body);
+
+            stripsBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
         }
         TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
-        stripsBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
+        stripsBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
     }
 
     /** Outputs changed while syncing: restart so the engine picks them up. */
@@ -541,7 +668,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
             refresh();
         } else if (requestCode == REQ_STRIP) {
             rebuildStrips();
-            if (resultCode == RESULT_OK) restartIfRunning();
             refresh();
         } else if (requestCode == REQ_EDIT_PALETTE) {
             if (resultCode == RESULT_OK && data != null) {

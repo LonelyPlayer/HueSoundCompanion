@@ -24,8 +24,8 @@ import java.nio.ByteBuffer;
 final class ScreenSource {
     private static final int SIZE = 96;
 
-    private final float[] u, v; // region centers per channel, 0..1
-    private final int n;
+    /** Region centers per channel, 0..1 (u = left/right, v = top/bottom); replaced as a pair. */
+    private volatile float[][] uv;
     private final Context context;
     private HandlerThread thread;
     private ImageReader reader;
@@ -36,13 +36,19 @@ final class ScreenSource {
 
     ScreenSource(Context context, float[] x, float[] z) {
         this.context = context.getApplicationContext();
-        n = x.length;
-        u = new float[n];
-        v = new float[n];
+        setPositions(x, z);
+    }
+
+    /** New channel positions (e.g. an LED strip was added); used from the next frame on. */
+    void setPositions(float[] x, float[] z) {
+        int n = x.length;
+        float[] u = new float[n], v = new float[n];
         for (int i = 0; i < n; i++) {
             u[i] = clamp01((x[i] + 1f) / 2f);
             v[i] = clamp01(1f - (z[i] + 1f) / 2f); // z = 1 is up → top of the screen
         }
+        uv = new float[][]{u, v};
+        colors = null;
     }
 
     /** Latest colors (rgb per channel, 0..1), or null before the first frame. */
@@ -101,6 +107,9 @@ final class ScreenSource {
         int ch = aspect >= 1 ? Math.round(SIZE / aspect) : SIZE;
         int cx0 = (SIZE - cw) / 2, cy0 = (SIZE - ch) / 2;
 
+        float[][] pos = uv;
+        float[] u = pos[0], v = pos[1];
+        int n = u.length;
         float[] out = new float[3 * n];
         for (int i = 0; i < n; i++) {
             // each light looks at a region around its position: 40% of the width, 50% of the height

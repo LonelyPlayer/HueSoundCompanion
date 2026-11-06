@@ -125,4 +125,69 @@ final class Ui {
 
     static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
+
+    interface IntGet {
+        int get();
+    }
+
+    interface IntSet {
+        void set(int v);
+    }
+
+    interface FloatSet {
+        void set(float v);
+    }
+
+    /** A horizontally scrolling row of single-choice chips. */
+    static android.view.View chipRow(Context c, String[] names, IntGet get, IntSet set) {
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(c);
+        hs.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = row(c);
+        java.util.List<TextView> chips = new java.util.ArrayList<>();
+        for (int i = 0; i < names.length; i++) {
+            final int v = i;
+            TextView chip = chip(c, names[i]);
+            chip.setOnClickListener(x -> {
+                set.set(v);
+                for (int k = 0; k < chips.size(); k++) setChipSelected(chips.get(k), k == get.get());
+            });
+            chips.add(chip);
+            row.addView(chip, margins(lp(WRAP, WRAP), 0, 0, dp(c, 8), 0));
+        }
+        for (int k = 0; k < chips.size(); k++) setChipSelected(chips.get(k), k == get.get());
+        hs.addView(row);
+        return hs;
+    }
+
+    /** A 0..1 slider. */
+    static android.widget.SeekBar slider(Context c, float value, FloatSet set) {
+        android.widget.SeekBar b = new android.widget.SeekBar(c);
+        b.setMax(100);
+        b.setProgress(Math.round(value * 100));
+        b.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        b.setThumbTintList(ColorStateList.valueOf(ACCENT));
+        b.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar s, int p, boolean u) {
+                if (u) set.set(p / 100f);
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar s) {
+            }
+        });
+        return b;
+    }
+
+    /** Small grey caps label. */
+    static TextView label(Context c, String s) {
+        TextView t = text(c, s.toUpperCase(), 12, SUB, true);
+        t.setLetterSpacing(0.08f);
+        t.setLayoutParams(margins(lp(MATCH, WRAP), 0, dp(c, 14), 0, dp(c, 6)));
+        return t;
+    }
 }

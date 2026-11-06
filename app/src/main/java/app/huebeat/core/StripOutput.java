@@ -31,7 +31,8 @@ public final class StripOutput {
     private final InetAddress address;
     private final int port, protocol, universe;
     private final boolean mirror, reverse;
-    private final float brightness;
+    /** 0..1, may be changed live. */
+    public volatile float brightness;
     private final int span;
     private final StripProtocol proto = new StripProtocol();
     private final float[] logical;
@@ -130,7 +131,7 @@ public final class StripOutput {
             float f = s - a;
             for (int k = 0; k < 3; k++) {
                 float v = lg[3 * a + k] * (1 - f) + lg[3 * b + k] * f;
-                v = Math.max(0f, Math.min(1f, v)) * brightness;
+                v = Math.max(0f, Math.min(1f, v)) * Math.max(0f, Math.min(1f, brightness));
                 pixels[3 * p + k] = (byte) Math.round(gammaLut[Math.round(v * 1024)] * 255f);
             }
         }

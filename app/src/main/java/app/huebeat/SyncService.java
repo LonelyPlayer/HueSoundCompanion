@@ -181,13 +181,16 @@ public class SyncService extends Service {
         DatagramSocket stripSock = null;
         boolean hue = prefs.isConfigured();
         try {
+            int seenStrips = Prefs.stripsVersion;
+            List<Strip> stripCfg = activeStrips(prefs);
             List<StripOutput> strips = new ArrayList<>();
-            for (Strip st : prefs.strips()) {
-                if (!st.enabled || st.ip.isEmpty()) continue;
+            List<String> stripKeys = new ArrayList<>();
+            for (Strip st : stripCfg) {
                 strips.add(st.output());
+                stripKeys.add(st.layoutKey());
             }
             if (!hue && strips.isEmpty()) throw new IOException("Connect a Hue bridge or add an LED strip first.");
-            if (!strips.isEmpty()) stripSock = new DatagramSocket();
+            stripSock = new DatagramSocket();
 
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
             HueApi.Channels ch = hue ? HueApi.channels(ip, user, area) : HueApi.Channels.empty();
@@ -230,27 +233,9 @@ public class SyncService extends Service {
             String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
             // TV camera: where each light sits on the screen, and what the lights showed recently
             // all outputs side by side: Hue channels first, then every strip's segments
-            int nHue = ch.ids.length;
-            int nch = nHue;
-            for (StripOutput so : strips) nch += so.segments;
-            float[] allX = new float[nch], allZ = new float[nch];
-            System.arraycopy(ch.x, 0, allX, 0, nHue);
-            System.arraycopy(ch.z, 0, allZ, 0, nHue);
-            int[] stripOff = new int[strips.size()];
-            float[][] stripScreen = new float[strips.size()][];
-            for (int k = 0, o = nHue; k < strips.size(); k++) {
-                StripOutput so = strips.get(k);
-                stripOff[k] = o;
-                System.arraycopy(so.segX, 0, allX, o, so.segments); // strips run along the screen's width
-                stripScreen[k] = new float[3 * so.segments];
-                o += so.segments;
-            }
-            float[] hueScreen = new float[3 * nHue];
-            float[] camU = new float[nch], camV = new float[nch], camOut = new float[3 * nch], calRgb = new float[3 * nHue];
-            for (int i = 0; i < nch; i++) {
-                camU[i] = Math.max(0f, Math.min(1f, (allX[i] + 1f) / 2f));
-                camV[i] = Math.max(0f, Math.min(1f, 1f - (allZ[i] + 1f) / 2f));
-            }
+            Layout lay = new Layout(ch, strips);
+            int nHue = lay.nHue;
+            float[] calRgb = new float[3 * nHue];
             long[] lightT = new long[128];
             float[] lightC = new float[3 * 128];
             int lightPos = 0;
@@ -261,6 +246,30 @@ public class SyncService extends Service {
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
 
+                // LED strip settings changed in the app: apply them without restarting the sync
+                if (Prefs.stripsVersion != seenStrips) {
+                    seenStrips = Prefs.stripsVersion;
+                    List<Strip> cfg = activeStrips(prefs);
+                    boolean sameLayout = cfg.size() == strips.size();
+                    for (int k = 0; sameLayout && k < cfg.size(); k++) sameLayout = cfg.get(k).layoutKey().equals(stripKeys.get(k));
+                    if (sameLayout) {
+                        for (int k = 0; k < cfg.size(); k++) cfg.get(k).applyLive(strips.get(k));
+                    } else {
+                        strips = new ArrayList<>();
+                        stripKeys = new ArrayList<>();
+                        for (Strip st : cfg) {
+                            try {
+                                strips.add(st.output());
+                                stripKeys.add(st.layoutKey());
+                            } catch (IOException ignored) {
+                                // bad address: skip this strip
+                            }
+                        }
+                        lay = new Layout(ch, strips);
+                        if (screen != null) screen.setPositions(lay.allX, lay.allZ);
+                        updateNotification(prefs);
+                    }
+                }
                 Features cap = analyzer.latest();
                 boolean captureSilent = cap == null || cap.silent;
                 if (captureSilent) captureLoudSince = 0;
@@ -280,7 +289,7 @@ public class SyncService extends Service {
                     // (A capture session can create its screen mirror only once, so it then stays on.)
                     boolean wantScreen = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
                     if (wantScreen && screen == null && mp != null && screenError == null && !CameraFeed.fresh(now)) {
-                        ScreenSource sc = new ScreenSource(this, allX, allZ);
+                        ScreenSource sc = new ScreenSource(this, lay.allX, lay.allZ);
                         if (sc.start(mp)) screen = sc;
                         else screenError = sc.error;
                     }
@@ -323,10 +332,10 @@ public class SyncService extends Service {
                             break;
                         }
                     }
-                    CameraFeed.colors.compute(camGrid, past, camU, camV, camOut);
-                    distribute(camOut, renderer, hueScreen, strips, stripOff, stripScreen);
+                    CameraFeed.colors.compute(camGrid, past, lay.camU, lay.camV, lay.camOut);
+                    distribute(lay.camOut, renderer, lay, strips);
                 } else {
-                    distribute(screen != null ? screen.colors() : null, renderer, hueScreen, strips, stripOff, stripScreen);
+                    distribute(screen != null ? screen.colors() : null, renderer, lay, strips);
                 }
 
                 // room-light calibration requested from the camera screen
@@ -389,9 +398,10 @@ public class SyncService extends Service {
                     }
                 }
                 lightT[lightPos] = now;
-                lightC[3 * lightPos] = sr / nch;
-                lightC[3 * lightPos + 1] = sg / nch;
-                lightC[3 * lightPos + 2] = sb / nch;
+                int nAll = Math.max(1, lay.nch);
+                lightC[3 * lightPos] = sr / nAll;
+                lightC[3 * lightPos + 1] = sg / nAll;
+                lightC[3 * lightPos + 2] = sb / nAll;
                 lightPos = (lightPos + 1) % lightT.length;
                 for (int k = 0; k < strips.size(); k++) {
                     try {
@@ -415,7 +425,7 @@ public class SyncService extends Service {
                     SyncState.set(SyncState.Status.RUNNING, "");
                 }
 
-                float[] m = renderer != null ? renderer.meanColor() : strips.get(0).meanColor();
+                float[] m = renderer != null ? renderer.meanColor() : (strips.isEmpty() ? new float[3] : strips.get(0).meanColor());
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
@@ -492,21 +502,55 @@ public class SyncService extends Service {
         }
     }
 
+    /** Positions of every output channel side by side: Hue channels, then each strip's segments. */
+    private static final class Layout {
+        final int nHue, nch;
+        final float[] allX, allZ, camU, camV, camOut;
+        final int[] stripOff;
+
+        Layout(HueApi.Channels ch, List<StripOutput> strips) {
+            nHue = ch.ids.length;
+            int n = nHue;
+            for (StripOutput so : strips) n += so.segments;
+            nch = n;
+            allX = new float[n];
+            allZ = new float[n];
+            System.arraycopy(ch.x, 0, allX, 0, nHue);
+            System.arraycopy(ch.z, 0, allZ, 0, nHue);
+            stripOff = new int[strips.size()];
+            for (int k = 0, o = nHue; k < strips.size(); k++) {
+                StripOutput so = strips.get(k);
+                stripOff[k] = o;
+                System.arraycopy(so.segX, 0, allX, o, so.segments); // strips run along the screen's width
+                o += so.segments;
+            }
+            camU = new float[n];
+            camV = new float[n];
+            camOut = new float[3 * n];
+            for (int i = 0; i < n; i++) {
+                camU[i] = Math.max(0f, Math.min(1f, (allX[i] + 1f) / 2f));
+                camV[i] = Math.max(0f, Math.min(1f, 1f - (allZ[i] + 1f) / 2f));
+            }
+        }
+    }
+
+    private static List<Strip> activeStrips(Prefs prefs) {
+        List<Strip> l = new ArrayList<>();
+        for (Strip st : prefs.strips()) if (st.enabled && !st.ip.isEmpty()) l.add(st);
+        return l;
+    }
+
     /** Hands the screen/camera colors (all outputs side by side) to each output's renderer. */
-    private static void distribute(float[] all, Renderer hueRenderer, float[] hueBuf, List<StripOutput> strips,
-                                   int[] stripOff, float[][] stripBuf) {
-        if (all == null) {
+    private static void distribute(float[] all, Renderer hueRenderer, Layout lay, List<StripOutput> strips) {
+        if (all == null || all.length < 3 * lay.nch) {
             if (hueRenderer != null) hueRenderer.setScreenColors(null);
             for (StripOutput so : strips) so.setScreenColors(null);
             return;
         }
-        if (hueRenderer != null) {
-            System.arraycopy(all, 0, hueBuf, 0, hueBuf.length);
-            hueRenderer.setScreenColors(hueBuf.clone());
-        }
+        if (hueRenderer != null) hueRenderer.setScreenColors(java.util.Arrays.copyOfRange(all, 0, 3 * lay.nHue));
         for (int k = 0; k < strips.size(); k++) {
-            System.arraycopy(all, 3 * stripOff[k], stripBuf[k], 0, stripBuf[k].length);
-            strips.get(k).setScreenColors(stripBuf[k].clone());
+            int o = 3 * lay.stripOff[k];
+            strips.get(k).setScreenColors(java.util.Arrays.copyOfRange(all, o, o + 3 * strips.get(k).segments));
         }
     }
 

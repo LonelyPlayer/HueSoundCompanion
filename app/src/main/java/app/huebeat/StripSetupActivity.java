@@ -83,7 +83,7 @@ public class StripSetupActivity extends Activity {
         root.setPadding(pad, Ui.dp(this, 16), pad, Ui.dp(this, 28));
         scroll.addView(root);
 
-        root.addView(Ui.text(this, index < 0 ? "Add LED strip" : "LED strip", 26, Ui.TEXT, true));
+        root.addView(Ui.text(this, index < 0 ? "Add LED strip" : "Strip connection", 26, Ui.TEXT, true));
         TextView sub = Ui.text(this, "For ESP32/ESP8266 controllers with WLED, ESPixelStick or anything else that "
                 + "speaks DDP or E1.31, the same protocols LedFx uses. The phone sends directly; no server needed.", 14, Ui.SUB, false);
         sub.setLineSpacing(0, 1.15f);
@@ -143,63 +143,6 @@ public class StripSetupActivity extends Activity {
         root.addView(toggle("Mirror from the center", strip.mirror, (bv, on) -> strip.mirror = on));
         root.addView(toggle("Reverse direction", strip.reverse, (bv, on) -> strip.reverse = on));
 
-        root.addView(label("Brightness"));
-        SeekBar bright = new SeekBar(this);
-        bright.setMax(100);
-        bright.setProgress(Math.round(strip.brightness * 100));
-        bright.setProgressTintList(ColorStateList.valueOf(Ui.ACCENT));
-        bright.setThumbTintList(ColorStateList.valueOf(Ui.ACCENT));
-        bright.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar s, int p, boolean u) {
-                if (u) strip.brightness = Math.max(0.05f, p / 100f);
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar s) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar s) {
-            }
-        });
-        root.addView(bright);
-
-        // ---- effect
-        root.addView(label("Effect"));
-        root.addView(chipRow(StripEffect.NAMES, () -> strip.effect, v -> strip.effect = v));
-        root.addView(label("Speed"));
-        root.addView(slider(strip.speed, v -> strip.speed = v));
-
-        root.addView(label("Colors"));
-        String[] pal = new String[Palettes.count() + 1];
-        pal[0] = "Same as lights";
-        for (int i = 0; i < Palettes.count(); i++) pal[i + 1] = Palettes.name(i);
-        root.addView(chipRow(pal, () -> strip.palette + 1, v -> strip.palette = v - 1));
-
-        // ---- strobe overlay
-        root.addView(label("Strobe overlay"));
-        TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
-        root.addView(sh);
-        root.addView(chipRow(StripEffect.STROBE_TRIGGERS, () -> strip.strobeTrigger, v -> {
-            strip.strobeTrigger = v;
-            strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
-        }));
-        strobeBox = Ui.column(this);
-        strobeBox.addView(label("Strobe color"));
-        String[] colorNames = new String[STROBE_COLORS.length];
-        for (int i = 0; i < colorNames.length; i++) colorNames[i] = STROBE_COLOR_NAMES[i];
-        strobeBox.addView(chipRow(colorNames, () -> colorIndex(strip.strobeColor), v -> strip.strobeColor = STROBE_COLORS[v]));
-        strobeBox.addView(label("Flash length"));
-        strobeBox.addView(slider(strip.strobeLength, v -> strip.strobeLength = v));
-        strobeBox.addView(label("Flash strength"));
-        strobeBox.addView(slider(strip.strobeAmount, v -> strip.strobeAmount = Math.max(0.1f, v)));
-        strobeBox.addView(label("Where it flashes"));
-        strobeBox.addView(chipRow(StripEffect.STROBE_COVERS, () -> strip.strobeCover, v -> strip.strobeCover = v));
-        TextView warn = Ui.text(this, "Fast flashing lights can trigger seizures in people with photosensitive epilepsy.", 12, Ui.SUB, false);
-        strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-        strobeBox.setVisibility(strip.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
-        root.addView(strobeBox);
 
         LinearLayout actions = Ui.row(this);
         TextView test = Ui.button(this, "Test", false);

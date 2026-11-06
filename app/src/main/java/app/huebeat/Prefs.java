@@ -148,12 +148,17 @@ public final class Prefs {
     public java.util.List<Strip> strips() {
         java.util.List<Strip> l = new java.util.ArrayList<>();
         try {
-            JSONArray a = new JSONArray(sp.getString("strips", "[]"));
+            String json = stripsCache != null ? stripsCache : sp.getString("strips", "[]");
+            JSONArray a = new JSONArray(json);
             for (int i = 0; i < a.length(); i++) l.add(Strip.fromJson(a.getJSONObject(i)));
         } catch (JSONException ignored) {
         }
         return l;
     }
+
+    /** Bumped on every change to the strips; the sync engine applies changes live when it moves. */
+    public static volatile int stripsVersion = 0;
+    private volatile String stripsCache;
 
     public void saveStrips(java.util.List<Strip> l) {
         JSONArray a = new JSONArray();
@@ -162,6 +167,8 @@ public final class Prefs {
         } catch (JSONException ignored) {
         }
         sp.edit().putString("strips", a.toString()).apply();
+        stripsCache = a.toString();
+        stripsVersion++;
     }
 
     public boolean hasEnabledStrips() {
