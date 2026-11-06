@@ -15,7 +15,7 @@ Music sync for Philips Hue that listens to **everything your phone plays** (spea
   - 6 frequency bands with automatic gain, so quiet and loud songs both work
   - "harmony color": the dominant notes are placed on the circle of fifths, so colors follow the song's key and chord changes
 - **Styles:** Beat, Spectrum (each light gets a frequency range by its position in the room), Ambient, Party (optional strobe), and **Screen** (ambilight: the lights take the colors of the screen area at their position, no music needed).
-- **TV camera:** point the phone at your TV (tap **TV camera** in the Colors row). The app finds the screen by itself (bright + moving picture), follows it when the phone moves, and sends its colors to the lights; you can also drag the four corners. **Calibrate room light** (with the TV paused on a still image) measures how much the Hue lights themselves shine onto the screen and with what delay, and removes that glow from the colors. Nothing is recorded. The camera screen must stay open; it dims itself after 15 s.
+- **TV camera:** point the phone at your TV (tap **TV camera** in the Colors row). The app finds the TV with an on-device object detector (Google MediaPipe, "tv" class), fits the corners to the TV's edges, follows it when the phone moves (slide, tilt, zoom) by tracking points around the TV, and sends its colors to the lights; you can also drag the four corners. **Calibrate room light** (with the TV paused on a still image) measures how much the Hue lights themselves shine onto the screen and with what delay, and removes that glow from the colors. Nothing is recorded. The camera screen must stay open; it dims itself after 15 s.
 - **Screen colors:** the **Screen** chip in the Colors row keeps any music style's rhythm but takes the colors from the phone screen. Protected video (Netflix etc.) shows as black to apps, so it can't drive the lights.
 - **Colors:** Auto (from the music), 7 built-in palettes (incl. Synthwave), and your own palettes (tap **+ New**; long-press one of yours to edit or delete it). Every palette is a looping color ramp: beats move a playhead along it (gliding in time with the tempo) and loudness pushes it further, so drops land on different colors. **Color movement** sets how far.
 - **Intensity** sets how hard and fast the lights react: low = soft swells that fade over the whole beat, high = sharp hits that drop to near-black between beats.
@@ -60,6 +60,8 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 | `core/Palettes.java` | Built-in and custom palettes |
 | `core/DtlsPskClient.java` | Minimal DTLS 1.2 PSK client (TLS_PSK_WITH_AES_128_GCM_SHA256) |
 | `core/HueStream.java` | HueStream v2 packet format |
+| `core/TvTracker.java` | Edge-fitted TV corners and keyframe point tracking for camera mode |
+| `TvMl.java` | MediaPipe TV detector (model downloaded by the cloud build) |
 | `SyncService.java` | Foreground service: audio capture → analysis → 50 packets/s to the bridge |
 | `HueApi.java` | Bridge discovery, pairing, entertainment areas, start/stop |
 

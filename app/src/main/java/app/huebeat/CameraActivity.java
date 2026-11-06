@@ -46,13 +46,14 @@ import java.util.List;
 
 import app.huebeat.core.LightSettings;
 import app.huebeat.core.TvDetector;
+import app.huebeat.core.TvTracker;
 
 /**
  * TV camera mode: point the phone at the TV. The app finds the screen in the camera image,
  * follows it when the phone moves, and sends its colors to the lights. Nothing is recorded.
  */
 public class CameraActivity extends Activity implements SyncState.Listener {
-    private static final int AW = 160, AH = 120; // analysis resolution
+    private static final int AW = 320, AH = 240; // analysis resolution
     private static final int REQ_CAMERA = 1, REQ_PROJECTION = 2;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -67,9 +68,17 @@ public class CameraActivity extends Activity implements SyncState.Listener {
     private int sensorOrientation = 90;
     private boolean exposureLocked = false;
 
-    private final TvDetector detector = new TvDetector(AW, AH);
+    private final TvTracker detector = new TvTracker(AW, AH);
+    /** Fallback when the ML model isn't available: brightness/motion heuristic at half size. */
+    private final TvDetector heuristic = new TvDetector(AW / 2, AH / 2);
     private final float[] luma = new float[AW * AH];
+    private final float[] lumaHalf = new float[(AW / 2) * (AH / 2)];
     private final int[] rgb = new int[AW * AH];
+    private volatile TvMl ml;
+    private HandlerThread mlThread;
+    private Handler mlHandler;
+    private volatile boolean mlBusy = false;
+    private long lastMl = 0;
 
     private PreviewView preview;
     private TextView status, syncButton, ambiButton;
@@ -122,6 +131,7 @@ public class CameraActivity extends Activity implements SyncState.Listener {
         TextView auto = Ui.button(this, "Auto-detect", false);
         auto.setOnClickListener(v -> {
             detector.autoDetect();
+            heuristic.autoDetect();
             relockExposure();
             updateStatus();
         });
@@ -168,11 +178,11 @@ public class CameraActivity extends Activity implements SyncState.Listener {
 
     private void updateStatus() {
         if (isFinishing()) return;
-        boolean found = detector.quad() != null;
+        boolean found = detector.quad() != null && !detector.isLost();
         String s;
         if (!found) s = "Looking for the TV… point the camera at it. Drag the corners if needed.";
         else if (detector.isManual()) s = "Using your corners. The camera follows when the phone moves.";
-        else s = "TV found and tracked.";
+        else s = ml != null ? "TV found and tracked." : "TV found and tracked (simple detection: the ML model isn't available).";
         String cal = CameraFeed.calibrationStatus;
         if (cal != null && !cal.isEmpty()) s += "\n" + cal;
         else if (!CameraFeed.colors.isCalibrated() && found) s += "\nTip: pause on a still image and tap \"Calibrate room light\".";
@@ -222,6 +232,7 @@ public class CameraActivity extends Activity implements SyncState.Listener {
         SyncState.add(this);
         lastTouch = System.currentTimeMillis();
         main.post(ticker);
+        startMl();
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera();
         else requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
     }
@@ -232,6 +243,7 @@ public class CameraActivity extends Activity implements SyncState.Listener {
         main.removeCallbacks(ticker);
         if (dimmed) setDim(false);
         stopCamera();
+        stopMl();
         CameraFeed.clear();
         super.onPause();
     }
@@ -307,6 +319,55 @@ public class CameraActivity extends Activity implements SyncState.Listener {
         } catch (Exception e) {
             SyncState.set(SyncState.Status.ERROR, "Could not start: " + e.getMessage());
         }
+    }
+
+    // ------------------------------------------------------------------ ML detection
+
+    private void startMl() {
+        mlThread = new HandlerThread("huebeat-ml");
+        mlThread.start();
+        mlHandler = new Handler(mlThread.getLooper());
+        mlHandler.post(() -> {
+            TvMl m = new TvMl();
+            if (m.init(getApplicationContext())) ml = m;
+        });
+    }
+
+    private void stopMl() {
+        Handler h = mlHandler;
+        if (h != null) {
+            h.post(() -> {
+                if (ml != null) ml.close();
+                ml = null;
+            });
+        }
+        if (mlThread != null) mlThread.quitSafely();
+        mlThread = null;
+        mlHandler = null;
+    }
+
+    /** On the camera thread: hand a copy of this frame to the detector thread a few times per second. */
+    private void maybeDetect() {
+        Handler h = mlHandler, cam = camHandler;
+        if (ml == null || h == null || cam == null || mlBusy) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMl < 150) return;
+        lastMl = now;
+        mlBusy = true;
+        final long frameNo = detector.frameNumber();
+        final float[] l = luma.clone();
+        final Bitmap bmp = Bitmap.createBitmap(AW, AH, Bitmap.Config.ARGB_8888);
+        int[] px = new int[AW * AH];
+        for (int i = 0; i < px.length; i++) px[i] = 0xFF000000 | rgb[i];
+        bmp.setPixels(px, 0, AW, 0, 0, AW, AH);
+        h.post(() -> {
+            float[] box = ml != null ? ml.detect(bmp) : null;
+            mlBusy = false;
+            if (box != null) {
+                Handler c = camHandler;
+                if (c != null) c.post(() -> detector.onBox(box[0], box[1], box[2], box[3], box[4], frameNo, l));
+            }
+        });
     }
 
     // ------------------------------------------------------------------ camera
@@ -485,10 +546,26 @@ public class CameraActivity extends Activity implements SyncState.Listener {
             }
         }
         detector.process(luma);
+        if (ml != null) {
+            maybeDetect();
+        } else {
+            // no ML model: the brightness/motion heuristic suggests where the TV is
+            int hw = AW / 2, hh = AH / 2;
+            for (int y = 0; y < hh; y++)
+                for (int x = 0; x < hw; x++)
+                    lumaHalf[y * hw + x] = (luma[2 * y * AW + 2 * x] + luma[2 * y * AW + 2 * x + 1]
+                            + luma[(2 * y + 1) * AW + 2 * x] + luma[(2 * y + 1) * AW + 2 * x + 1]) / 4f;
+            heuristic.process(lumaHalf);
+            float[] hq = heuristic.quad();
+            if (hq != null && detector.frameNumber() % 10 == 0) {
+                for (int i = 0; i < 8; i++) hq[i] *= 2f;
+                detector.onQuad(hq, heuristic.confidence * 0.5f, detector.frameNumber());
+            }
+        }
         float[] grid = new float[CameraFeed.GW * CameraFeed.GH * 3];
         if (detector.sampleGrid(rgb, CameraFeed.GW, CameraFeed.GH, grid)) CameraFeed.publish(grid, System.nanoTime());
         else CameraFeed.clear();
-        preview.post(rgb, detector.quad(), detector.isManual());
+        preview.post(rgb, detector.isLost() ? null : detector.quad(), detector.isManual());
     }
 
     private static int clamp255(int v) {
@@ -564,7 +641,7 @@ public class CameraActivity extends Activity implements SyncState.Listener {
                     float[] q = quad;
                     if (q == null) {
                         // no TV yet: start a default box around the touch point
-                        q = new float[]{ax - 30, ay - 18, ax + 30, ay - 18, ax + 30, ay + 18, ax - 30, ay + 18};
+                        q = new float[]{ax - 60, ay - 36, ax + 60, ay - 36, ax + 60, ay + 36, ax - 60, ay + 36};
                         quad = q;
                     }
                     float best = Ui.dp(getContext(), 40) / scale;

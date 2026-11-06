@@ -19,6 +19,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Download TV detection model
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fL --retry 3 -o app/src/main/assets/efficientdet_lite0.tflite \
+            https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite
+          ls -l app/src/main/assets
+
       - name: Build APK
         run: |
           chmod +x gradlew
