@@ -45,6 +45,10 @@ public final class StripOutput {
     private final byte[] pixels;
     /** Rounding error carried to the next frame per LED channel (temporal dithering). */
     private final float[] dither;
+    /** Per LED channel: the value it was last moving from, and for how many frames it has stood still. */
+    private final float[] ditherRef;
+    private final int[] still;
+    private static final int STILL_FRAMES = 50; // 1 s at 50 fps
 
     public StripOutput(String name, InetAddress address, int protocol, int leds, int universe,
                        boolean mirror, boolean reverse, float brightness) {
@@ -66,6 +70,8 @@ public final class StripOutput {
         logical = new float[3 * span];
         pixels = new byte[3 * this.leds];
         dither = new float[3 * this.leds];
+        ditherRef = new float[3 * this.leds];
+        still = new int[3 * this.leds];
         // different start offsets per LED, so neighbours step at different moments (no strip-wide pulsing)
         java.util.Random rnd = new java.util.Random(1);
         for (int i = 0; i < dither.length; i++) dither[i] = rnd.nextFloat() - 0.5f;
@@ -180,7 +186,17 @@ public final class StripOutput {
                 // WS2812-type LEDs are linear; the frames are perceptual → extra gamma
                 float want = (float) Math.pow(v, 1.6) * 255f;
                 int o;
-                if (dithered && want > 0.02f) {
+                int q = 3 * p + k;
+                if (dithered) {
+                    // a channel that hasn't moved by a quarter level for a second is a still image
+                    if (Math.abs(want - ditherRef[q]) > 0.25f) {
+                        ditherRef[q] = want;
+                        still[q] = 0;
+                    } else if (still[q] < STILL_FRAMES) {
+                        still[q]++;
+                    }
+                }
+                if (dithered && want > 0.02f && still[q] < STILL_FRAMES) {
                     // 8 bits are too coarse for slow fades in the dark: alternate between the two
                     // neighbouring levels so the average over a few frames hits the exact value
                     float x = want + dither[3 * p + k];
@@ -188,7 +204,6 @@ public final class StripOutput {
                     dither[3 * p + k] = Math.max(-0.5f, Math.min(0.5f, x - o));
                 } else {
                     o = Math.round(want);
-                    if (dithered) dither[3 * p + k] = 0f;
                 }
                 pixels[3 * p + k] = (byte) o;
             }
