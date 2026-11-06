@@ -550,6 +550,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 st.enabled = checked;
                 saveStrips();
                 refresh();
+                switchStrip(st, checked);
             });
             head.addView(on);
             card.addView(head);
@@ -676,6 +677,30 @@ public class MainActivity extends Activity implements SyncState.Listener {
         TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
         stripsBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+    }
+
+    /** Turning a strip off in the app turns the LEDs off too; turning it on wakes a WLED controller. */
+    private void switchStrip(Strip st, boolean on) {
+        if (st.ip.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                if (!on) {
+                    Thread.sleep(250); // let a running sync drop the strip first
+                    try (java.net.DatagramSocket sock = new java.net.DatagramSocket()) {
+                        app.huebeat.core.StripOutput so = st.output();
+                        float[] black = so.fill(new float[3]);
+                        for (int k = 0; k < 3; k++) {
+                            so.send(sock, black);
+                            Thread.sleep(40);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                WledApi.setOn(st.ip, on);
+            } catch (Exception ignored) {
+                // not a WLED controller (plain DDP/E1.31 firmware): the black frame is all we can do
+            }
+        }, "strip-switch").start();
     }
 
     private String stripAmbientName(Strip st) {

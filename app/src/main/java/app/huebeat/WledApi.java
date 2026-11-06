@@ -85,4 +85,21 @@ final class WledApi {
         c.disconnect();
         if (code >= 400) throw new IOException("HTTP " + code);
     }
+
+    /** Switches a WLED controller on or off (and ends any live/realtime override). */
+    static void setOn(String ip, boolean on) throws IOException {
+        String body = "{\"on\":" + on + ",\"live\":false}";
+        HttpURLConnection c = (HttpURLConnection) new URL("http://" + ip + "/json/state").openConnection();
+        c.setConnectTimeout(2500);
+        c.setReadTimeout(3000);
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json");
+        try (java.io.OutputStream os = c.getOutputStream()) {
+            os.write(body.getBytes("UTF-8"));
+        }
+        int code = c.getResponseCode();
+        c.disconnect();
+        if (code >= 400) throw new IOException("HTTP " + code);
+    }
 }
