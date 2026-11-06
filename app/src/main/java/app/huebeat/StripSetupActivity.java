@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Set;
 
 import app.huebeat.core.Palettes;
+import app.huebeat.core.StripEffect;
 import app.huebeat.core.StripOutput;
 import app.huebeat.core.StripProtocol;
 
@@ -164,6 +165,42 @@ public class StripSetupActivity extends Activity {
         });
         root.addView(bright);
 
+        // ---- effect
+        root.addView(label("Effect"));
+        root.addView(chipRow(StripEffect.NAMES, () -> strip.effect, v -> strip.effect = v));
+        root.addView(label("Speed"));
+        root.addView(slider(strip.speed, v -> strip.speed = v));
+
+        root.addView(label("Colors"));
+        String[] pal = new String[Palettes.count() + 1];
+        pal[0] = "Same as lights";
+        for (int i = 0; i < Palettes.count(); i++) pal[i + 1] = Palettes.name(i);
+        root.addView(chipRow(pal, () -> strip.palette + 1, v -> strip.palette = v - 1));
+
+        // ---- strobe overlay
+        root.addView(label("Strobe overlay"));
+        TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
+        root.addView(sh);
+        root.addView(chipRow(StripEffect.STROBE_TRIGGERS, () -> strip.strobeTrigger, v -> {
+            strip.strobeTrigger = v;
+            strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+        }));
+        strobeBox = Ui.column(this);
+        strobeBox.addView(label("Strobe color"));
+        String[] colorNames = new String[STROBE_COLORS.length];
+        for (int i = 0; i < colorNames.length; i++) colorNames[i] = STROBE_COLOR_NAMES[i];
+        strobeBox.addView(chipRow(colorNames, () -> colorIndex(strip.strobeColor), v -> strip.strobeColor = STROBE_COLORS[v]));
+        strobeBox.addView(label("Flash length"));
+        strobeBox.addView(slider(strip.strobeLength, v -> strip.strobeLength = v));
+        strobeBox.addView(label("Flash strength"));
+        strobeBox.addView(slider(strip.strobeAmount, v -> strip.strobeAmount = Math.max(0.1f, v)));
+        strobeBox.addView(label("Where it flashes"));
+        strobeBox.addView(chipRow(StripEffect.STROBE_COVERS, () -> strip.strobeCover, v -> strip.strobeCover = v));
+        TextView warn = Ui.text(this, "Fast flashing lights can trigger seizures in people with photosensitive epilepsy.", 12, Ui.SUB, false);
+        strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        strobeBox.setVisibility(strip.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+        root.addView(strobeBox);
+
         LinearLayout actions = Ui.row(this);
         TextView test = Ui.button(this, "Test", false);
         test.setOnClickListener(v -> test());
@@ -193,6 +230,71 @@ public class StripSetupActivity extends Activity {
 
         refreshProto();
         Ui.setupWindow(this, scroll);
+    }
+
+    private static final int[] STROBE_COLORS = {0xFFFFFF, 0xFF0000, 0x0040FF, 0x7A00FF, 0xFFA000, 0x00FF40, 0xFF00C8, 0x00E5FF};
+    private static final String[] STROBE_COLOR_NAMES = {"White", "Red", "Blue", "UV", "Amber", "Green", "Pink", "Cyan"};
+    private LinearLayout strobeBox;
+
+    private static int colorIndex(int c) {
+        for (int i = 0; i < STROBE_COLORS.length; i++) if (STROBE_COLORS[i] == c) return i;
+        return 0;
+    }
+
+    private interface IntGet {
+        int get();
+    }
+
+    private interface IntSet {
+        void set(int v);
+    }
+
+    private interface FloatSet {
+        void set(float v);
+    }
+
+    /** A horizontally scrolling row of single-choice chips. */
+    private View chipRow(String[] names, IntGet get, IntSet set) {
+        android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(this);
+        hs.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = Ui.row(this);
+        List<TextView> chips = new ArrayList<>();
+        for (int i = 0; i < names.length; i++) {
+            final int v = i;
+            TextView chip = Ui.chip(this, names[i]);
+            chip.setOnClickListener(x -> {
+                set.set(v);
+                for (int k = 0; k < chips.size(); k++) Ui.setChipSelected(chips.get(k), k == get.get());
+            });
+            chips.add(chip);
+            row.addView(chip, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, 0, Ui.dp(this, 8), 0));
+        }
+        for (int k = 0; k < chips.size(); k++) Ui.setChipSelected(chips.get(k), k == get.get());
+        hs.addView(row);
+        return hs;
+    }
+
+    private SeekBar slider(float value, FloatSet set) {
+        SeekBar b = new SeekBar(this);
+        b.setMax(100);
+        b.setProgress(Math.round(value * 100));
+        b.setProgressTintList(ColorStateList.valueOf(Ui.ACCENT));
+        b.setThumbTintList(ColorStateList.valueOf(Ui.ACCENT));
+        b.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar s, int p, boolean u) {
+                if (u) set.set(p / 100f);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar s) {
+            }
+        });
+        return b;
     }
 
     private TextView label(String s) {
@@ -274,14 +376,13 @@ public class StripSetupActivity extends Activity {
             try (DatagramSocket sock = new DatagramSocket()) {
                 StripOutput out = new StripOutput(s.name, InetAddress.getByName(s.ip), s.protocol, s.leds, s.universe,
                         s.mirror, s.reverse, s.brightness);
-                float[] seg = new float[3 * out.segments];
+                int span = s.mirror ? (s.leds + 1) / 2 : s.leds;
+                float[] px = new float[3 * span];
                 long start = System.nanoTime();
                 while (System.nanoTime() - start < 3_000_000_000L && alive) {
                     float t = (System.nanoTime() - start) / 1e9f;
-                    for (int i = 0; i < out.segments; i++) {
-                        Palettes.hsv(t * 0.5f + (float) i / out.segments, 1f, 1f, seg, 3 * i);
-                    }
-                    out.send(sock, seg);
+                    for (int i = 0; i < span; i++) Palettes.hsv(t * 0.5f + (float) i / span, 1f, 1f, px, 3 * i);
+                    out.send(sock, px);
                     Thread.sleep(20);
                 }
                 result = "Test sent. The strip should have shown a moving rainbow (left = start of the strip).";

@@ -9,6 +9,9 @@ public final class Features {
     public float level;
     /** Per-band energy, auto-gained, 0..1. */
     public final float[] bands = new float[BANDS];
+    /** Finer spectrum for LED strip effects: 24 log-spaced bands from 40 Hz to 14 kHz, auto-gained, 0..1. */
+    public static final int SPEC = 24;
+    public final float[] spec = new float[SPEC];
     /** Increments on every detected beat (kick / bass onset). */
     public int beatCount;
     /** Strength of the most recent beat, 0..1. */
@@ -33,6 +36,7 @@ public final class Features {
         f.timeNanos = timeNanos;
         f.level = level;
         System.arraycopy(bands, 0, f.bands, 0, BANDS);
+        System.arraycopy(spec, 0, f.spec, 0, SPEC);
         f.beatCount = beatCount;
         f.beatStrength = beatStrength;
         f.snareCount = snareCount;

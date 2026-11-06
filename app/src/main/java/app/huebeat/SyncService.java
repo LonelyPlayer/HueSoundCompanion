@@ -184,8 +184,7 @@ public class SyncService extends Service {
             List<StripOutput> strips = new ArrayList<>();
             for (Strip st : prefs.strips()) {
                 if (!st.enabled || st.ip.isEmpty()) continue;
-                strips.add(new StripOutput(st.name, InetAddress.getByName(st.ip), st.protocol, st.leds, st.universe,
-                        st.mirror, st.reverse, st.brightness));
+                strips.add(st.output());
             }
             if (!hue && strips.isEmpty()) throw new IOException("Connect a Hue bridge or add an LED strip first.");
             if (!strips.isEmpty()) stripSock = new DatagramSocket();
@@ -239,13 +238,11 @@ public class SyncService extends Service {
             System.arraycopy(ch.z, 0, allZ, 0, nHue);
             int[] stripOff = new int[strips.size()];
             float[][] stripScreen = new float[strips.size()][];
-            float[][] stripCal = new float[strips.size()][];
             for (int k = 0, o = nHue; k < strips.size(); k++) {
                 StripOutput so = strips.get(k);
                 stripOff[k] = o;
                 System.arraycopy(so.segX, 0, allX, o, so.segments); // strips run along the screen's width
                 stripScreen[k] = new float[3 * so.segments];
-                stripCal[k] = new float[3 * so.segments];
                 o += so.segments;
             }
             float[] hueScreen = new float[3 * nHue];
@@ -375,17 +372,7 @@ public class SyncService extends Service {
                 if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, ls);
                 float[][] stripRgb = new float[strips.size()][];
                 for (int k = 0; k < strips.size(); k++) {
-                    if (calibrating) {
-                        float[] c = stripCal[k];
-                        for (int i = 0; i < c.length; i += 3) {
-                            c[i] = calColor[0];
-                            c[i + 1] = calColor[1];
-                            c[i + 2] = calColor[2];
-                        }
-                        stripRgb[k] = c;
-                    } else {
-                        stripRgb[k] = strips.get(k).renderer.render(f, tSec, dt, ls);
-                    }
+                    stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, ls);
                 }
                 // remember what the lights showed (average), for removing their glow from the camera image
                 float sr = 0f, sg = 0f, sb = 0f;
@@ -428,7 +415,7 @@ public class SyncService extends Service {
                     SyncState.set(SyncState.Status.RUNNING, "");
                 }
 
-                float[] m = renderer != null ? renderer.meanColor() : strips.get(0).renderer.meanColor();
+                float[] m = renderer != null ? renderer.meanColor() : strips.get(0).meanColor();
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
@@ -510,7 +497,7 @@ public class SyncService extends Service {
                                    int[] stripOff, float[][] stripBuf) {
         if (all == null) {
             if (hueRenderer != null) hueRenderer.setScreenColors(null);
-            for (StripOutput so : strips) so.renderer.setScreenColors(null);
+            for (StripOutput so : strips) so.setScreenColors(null);
             return;
         }
         if (hueRenderer != null) {
@@ -519,7 +506,7 @@ public class SyncService extends Service {
         }
         for (int k = 0; k < strips.size(); k++) {
             System.arraycopy(all, 3 * stripOff[k], stripBuf[k], 0, stripBuf[k].length);
-            strips.get(k).renderer.setScreenColors(stripBuf[k].clone());
+            strips.get(k).setScreenColors(stripBuf[k].clone());
         }
     }
 

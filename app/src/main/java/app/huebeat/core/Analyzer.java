@@ -35,6 +35,9 @@ public final class Analyzer {
     private final float[] prevLogMag = new float[N / 2];
 
     private final int[] bandLo = new int[Features.BANDS], bandHi = new int[Features.BANDS];
+    private final int[] specLo = new int[Features.SPEC], specHi = new int[Features.SPEC];
+    private final float[] specSmooth = new float[Features.SPEC], specTmp = new float[Features.SPEC];
+    private float specGlobalPeak = 1e-6f;
     private float binsFor = -1f;
     private int binsCount = 0;
     private long lastNanos = 0, lastLoudNanos = Long.MIN_VALUE / 2;
@@ -90,6 +93,12 @@ public final class Analyzer {
         for (int b = 0; b < Features.BANDS; b++) {
             bandLo[b] = Math.min(nBins - 1, Math.max(1, Math.round(BAND_EDGES[b] / binHz)));
             bandHi[b] = Math.max(bandLo[b] + 1, Math.min(nBins, Math.round(BAND_EDGES[b + 1] / binHz)));
+        }
+        for (int b = 0; b < Features.SPEC; b++) {
+            double f0 = 40 * Math.pow(14000.0 / 40, (double) b / Features.SPEC);
+            double f1 = 40 * Math.pow(14000.0 / 40, (double) (b + 1) / Features.SPEC);
+            specLo[b] = Math.min(nBins - 1, Math.max(1, (int) Math.floor(f0 / binHz)));
+            specHi[b] = Math.max(specLo[b] + 1, Math.min(nBins, (int) Math.ceil(f1 / binHz)));
         }
         kickLo = Math.max(1, Math.round(35 / binHz));
         kickHi = Math.min(nBins, Math.max(kickLo + 1, Math.round(180 / binHz) + 1));
@@ -199,6 +208,26 @@ public final class Analyzer {
             float a = norm > bandSmooth[b] ? rate(0.65f, k) : rate(0.18f, k);
             bandSmooth[b] += (norm - bandSmooth[b]) * a;
             cur.bands[b] = bandSmooth[b];
+        }
+        // Fine spectrum: one shared gain for all bands (so it shows the real balance between bass
+        // and treble), with a tilt that undoes music's natural fall-off toward high frequencies.
+        float specMax = 0f;
+        float[] e24 = specTmp;
+        for (int b = 0; b < Features.SPEC; b++) {
+            double p = 0;
+            for (int i = specLo[b]; i < specHi[b]; i++) p += mag[i] * mag[i];
+            float center = 40f * (float) Math.pow(14000.0 / 40, (b + 0.5) / Features.SPEC);
+            e24[b] = (float) Math.sqrt(p / (specHi[b] - specLo[b])) * (float) Math.pow(center / 1000f, 0.45);
+            specMax = Math.max(specMax, e24[b]);
+        }
+        specGlobalPeak = Math.max(specMax, Math.max(specGlobalPeak * (float) Math.pow(0.996f, k), bandFloor));
+        for (int b = 0; b < Features.SPEC; b++) {
+            // decibel scale (36 dB range), like an audio equalizer: quieter instruments stay visible
+            float bdb = 20f * (float) Math.log10(e24[b] / specGlobalPeak + 1e-9f);
+            float norm = silent ? 0f : (float) Math.pow(clamp01((bdb + 36f) / 36f), 1.5);
+            float a = norm > specSmooth[b] ? rate(0.7f, k) : rate(0.2f, k);
+            specSmooth[b] += (norm - specSmooth[b]) * a;
+            cur.spec[b] = specSmooth[b];
         }
         levelPeak = Math.max(rms, Math.max(levelPeak * peakDecay, levelFloor));
         float lvl = silent ? 0f : (float) Math.pow(rms / levelPeak, 1.2);

@@ -20,4 +20,16 @@ public final class LightSettings {
     public volatile int delayMs = 0;
     /** Allow full-white strobe flashes in Party style. */
     public volatile boolean strobe = false;
+
+    /** Copies every setting from another instance. */
+    public void copyFrom(LightSettings o) {
+        style = o.style;
+        palette = o.palette;
+        screenColors = o.screenColors;
+        colorMove = o.colorMove;
+        intensity = o.intensity;
+        maxBrightness = o.maxBrightness;
+        delayMs = o.delayMs;
+        strobe = o.strobe;
+    }
 }
