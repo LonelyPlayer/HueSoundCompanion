@@ -270,8 +270,8 @@ public class CameraActivity extends Activity implements SyncState.Listener {
     }
 
     private void startSync() {
-        if (!prefs.isConfigured()) {
-            status.setText("Connect your bridge on the main screen first.");
+        if (!prefs.hasOutputs()) {
+            status.setText("Connect your Hue bridge or add an LED strip on the main screen first.");
             return;
         }
         List<String> need = new ArrayList<>();

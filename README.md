@@ -17,6 +17,7 @@ Music sync for Philips Hue that listens to **everything your phone plays** (spea
 - **Styles:** Beat, Spectrum (each light gets a frequency range by its position in the room), Ambient, Party (optional strobe), and **Screen** (ambilight: the lights take the colors of the screen area at their position, no music needed).
 - **TV camera:** point the phone at your TV (tap **TV camera** in the Colors row). The app finds the TV with an on-device object detector (Google MediaPipe, "tv" class), fits the corners to the TV's edges, follows it when the phone moves (slide, tilt, zoom) by tracking points around the TV, and sends its colors to the lights; you can also drag the four corners. **Calibrate room light** (with the TV paused on a still image) measures how much the Hue lights themselves shine onto the screen and with what delay, and removes that glow from the colors. Nothing is recorded. The camera screen must stay open; it dims itself after 15 s.
 - **Screen colors:** the **Screen** chip in the Colors row keeps any music style's rhythm but takes the colors from the phone screen. Protected video (Netflix etc.) shows as black to apps, so it can't drive the lights.
+- **LED strips (ESP32 / ESP8266):** add WLED controllers (found automatically on the Wi-Fi) or any firmware that speaks **DDP**, **E1.31/sACN** or **WLED UDP**, the same protocols LedFx uses. The phone sends directly, no server needed. Strips follow the same styles, palettes, screen and TV camera colors as the Hue lights, with optional mirror-from-center, reverse and brightness. They work with or without a Hue bridge.
 - **Colors:** Auto (from the music), 7 built-in palettes (incl. Synthwave), and your own palettes (tap **+ New**; long-press one of yours to edit or delete it). Every palette is a looping color ramp: beats move a playhead along it (gliding in time with the tempo) and loudness pushes it further, so drops land on different colors. **Color movement** sets how far.
 - **Intensity** sets how hard and fast the lights react: low = soft swells that fade over the whole beat, high = sharp hits that drop to near-black between beats.
 - **Light delay** slider, remembered separately for the phone speaker and Bluetooth (Bluetooth audio usually arrives 150–300 ms late).
@@ -62,6 +63,9 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 | `core/HueStream.java` | HueStream v2 packet format |
 | `core/TvTracker.java` | Edge-fitted TV corners and keyframe point tracking for camera mode |
 | `TvMl.java` | MediaPipe TV detector (model downloaded by the cloud build) |
+| `core/StripProtocol.java` | DDP, E1.31 and WLED UDP packets |
+| `core/StripOutput.java` | Renders effects on strip segments, interpolates to every LED, gamma, sends |
+| `StripSetupActivity.java` | WLED discovery (mDNS + /json/info) and strip settings |
 | `SyncService.java` | Foreground service: audio capture → analysis → 50 packets/s to the bridge |
 | `HueApi.java` | Bridge discovery, pairing, entertainment areas, start/stop |
 

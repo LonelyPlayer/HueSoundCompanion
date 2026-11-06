@@ -29,7 +29,10 @@ import android.os.Looper;
 import android.os.PowerManager;
 
 import java.io.IOException;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 import app.huebeat.core.Analyzer;
 import app.huebeat.core.CameraColors;
@@ -38,6 +41,7 @@ import app.huebeat.core.Features;
 import app.huebeat.core.HueStream;
 import app.huebeat.core.LightSettings;
 import app.huebeat.core.Renderer;
+import app.huebeat.core.StripOutput;
 
 /** Foreground service: captures audio, analyses it and streams colors to the Hue bridge. */
 public class SyncService extends Service {
@@ -174,9 +178,20 @@ public class SyncService extends Service {
         ScreenSource screen = null;
         String screenError = null;
         boolean streamingStarted = false;
+        DatagramSocket stripSock = null;
+        boolean hue = prefs.isConfigured();
         try {
-            SyncState.set(SyncState.Status.STARTING, "Connecting to bridge…");
-            HueApi.Channels ch = HueApi.channels(ip, user, area);
+            List<StripOutput> strips = new ArrayList<>();
+            for (Strip st : prefs.strips()) {
+                if (!st.enabled || st.ip.isEmpty()) continue;
+                strips.add(new StripOutput(st.name, InetAddress.getByName(st.ip), st.protocol, st.leds, st.universe,
+                        st.mirror, st.reverse, st.brightness));
+            }
+            if (!hue && strips.isEmpty()) throw new IOException("Connect a Hue bridge or add an LED strip first.");
+            if (!strips.isEmpty()) stripSock = new DatagramSocket();
+
+            SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
+            HueApi.Channels ch = hue ? HueApi.channels(ip, user, area) : HueApi.Channels.empty();
 
             rec = createRecorder(mode, mp, prefs);
             final AudioRecord frec = rec;
@@ -193,12 +208,14 @@ public class SyncService extends Service {
             audioThread.setPriority(Thread.MAX_PRIORITY);
             audioThread.start();
 
-            HueApi.setStreaming(ip, user, area, true);
-            streamingStarted = true;
-            dtls = connect(ip, user, key);
+            if (hue) {
+                HueApi.setStreaming(ip, user, area, true);
+                streamingStarted = true;
+                dtls = connect(ip, user, key);
+            }
 
-            Renderer renderer = new Renderer(ch.x);
-            HueStream stream = new HueStream(area);
+            Renderer renderer = hue ? new Renderer(ch.x) : null;
+            HueStream stream = hue ? new HueStream(area) : null;
             LightSettings ls = prefs.light;
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             boolean bt = isBluetoothOutput(am);
@@ -213,11 +230,29 @@ public class SyncService extends Service {
             String vizError = null;
             String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
             // TV camera: where each light sits on the screen, and what the lights showed recently
-            int nch = ch.ids.length;
-            float[] camU = new float[nch], camV = new float[nch], camOut = new float[3 * nch], calRgb = new float[3 * nch];
+            // all outputs side by side: Hue channels first, then every strip's segments
+            int nHue = ch.ids.length;
+            int nch = nHue;
+            for (StripOutput so : strips) nch += so.segments;
+            float[] allX = new float[nch], allZ = new float[nch];
+            System.arraycopy(ch.x, 0, allX, 0, nHue);
+            System.arraycopy(ch.z, 0, allZ, 0, nHue);
+            int[] stripOff = new int[strips.size()];
+            float[][] stripScreen = new float[strips.size()][];
+            float[][] stripCal = new float[strips.size()][];
+            for (int k = 0, o = nHue; k < strips.size(); k++) {
+                StripOutput so = strips.get(k);
+                stripOff[k] = o;
+                System.arraycopy(so.segX, 0, allX, o, so.segments); // strips run along the screen's width
+                stripScreen[k] = new float[3 * so.segments];
+                stripCal[k] = new float[3 * so.segments];
+                o += so.segments;
+            }
+            float[] hueScreen = new float[3 * nHue];
+            float[] camU = new float[nch], camV = new float[nch], camOut = new float[3 * nch], calRgb = new float[3 * nHue];
             for (int i = 0; i < nch; i++) {
-                camU[i] = Math.max(0f, Math.min(1f, (ch.x[i] + 1f) / 2f));
-                camV[i] = Math.max(0f, Math.min(1f, 1f - (ch.z[i] + 1f) / 2f));
+                camU[i] = Math.max(0f, Math.min(1f, (allX[i] + 1f) / 2f));
+                camV[i] = Math.max(0f, Math.min(1f, 1f - (allZ[i] + 1f) / 2f));
             }
             long[] lightT = new long[128];
             float[] lightC = new float[3 * 128];
@@ -248,7 +283,7 @@ public class SyncService extends Service {
                     // (A capture session can create its screen mirror only once, so it then stays on.)
                     boolean wantScreen = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
                     if (wantScreen && screen == null && mp != null && screenError == null && !CameraFeed.fresh(now)) {
-                        ScreenSource sc = new ScreenSource(this, ch.x, ch.z);
+                        ScreenSource sc = new ScreenSource(this, allX, allZ);
                         if (sc.start(mp)) screen = sc;
                         else screenError = sc.error;
                     }
@@ -292,9 +327,9 @@ public class SyncService extends Service {
                         }
                     }
                     CameraFeed.colors.compute(camGrid, past, camU, camV, camOut);
-                    renderer.setScreenColors(camOut);
+                    distribute(camOut, renderer, hueScreen, strips, stripOff, stripScreen);
                 } else {
-                    renderer.setScreenColors(screen != null ? screen.colors() : null);
+                    distribute(screen != null ? screen.colors() : null, renderer, hueScreen, strips, stripOff, stripScreen);
                 }
 
                 // room-light calibration requested from the camera screen
@@ -307,48 +342,79 @@ public class SyncService extends Service {
                         CameraFeed.calibrationStatus = "Calibration needs the TV camera screen open.";
                     }
                 }
-                float[] rgb;
+                float[] rgb = null;
+                boolean calibrating = false;
+                float[] calColor = null;
                 if (calibrator != null) {
                     float[] lc = calibrator.lightColor(now);
                     if (!camera) {
                         calibrator = null;
                         CameraFeed.calibrationStatus = "Calibration stopped: the camera lost the TV.";
-                        rgb = renderer.render(active.at(now), (now - start) / 1e9, dt, ls);
                     } else if (lc == null) {
                         if (calibrator.finish()) CameraFeed.colors.setCalibration(calibrator.model, calibrator.latencyMs);
                         CameraFeed.calibrationStatus = calibrator.result;
                         calibrator = null;
-                        rgb = renderer.render(active.at(now), (now - start) / 1e9, dt, ls);
                     } else {
                         long gt = CameraFeed.gridNanos;
                         if (gt != lastCalFrame && camGrid != null) {
                             calibrator.addFrame(gt, camGrid);
                             lastCalFrame = gt;
                         }
-                        for (int i = 0; i < nch; i++) {
+                        for (int i = 0; i < nHue; i++) {
                             calRgb[3 * i] = lc[0];
                             calRgb[3 * i + 1] = lc[1];
                             calRgb[3 * i + 2] = lc[2];
                         }
                         rgb = calRgb;
+                        calibrating = true;
+                        calColor = lc;
                     }
-                } else {
-                    Features f = active.at(now - ls.delayMs * 1_000_000L);
-                    rgb = renderer.render(f, (now - start) / 1e9, dt, ls);
+                }
+                Features f = active.at(now - ls.delayMs * 1_000_000L);
+                double tSec = (now - start) / 1e9;
+                if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, ls);
+                float[][] stripRgb = new float[strips.size()][];
+                for (int k = 0; k < strips.size(); k++) {
+                    if (calibrating) {
+                        float[] c = stripCal[k];
+                        for (int i = 0; i < c.length; i += 3) {
+                            c[i] = calColor[0];
+                            c[i + 1] = calColor[1];
+                            c[i + 2] = calColor[2];
+                        }
+                        stripRgb[k] = c;
+                    } else {
+                        stripRgb[k] = strips.get(k).renderer.render(f, tSec, dt, ls);
+                    }
                 }
                 // remember what the lights showed (average), for removing their glow from the camera image
                 float sr = 0f, sg = 0f, sb = 0f;
-                for (int i = 0; i < nch; i++) {
+                for (int i = 0; i < nHue; i++) {
                     sr += rgb[3 * i];
                     sg += rgb[3 * i + 1];
                     sb += rgb[3 * i + 2];
+                }
+                for (float[] sRgb : stripRgb) {
+                    for (int i = 0; i < sRgb.length; i += 3) {
+                        sr += sRgb[i];
+                        sg += sRgb[i + 1];
+                        sb += sRgb[i + 2];
+                    }
                 }
                 lightT[lightPos] = now;
                 lightC[3 * lightPos] = sr / nch;
                 lightC[3 * lightPos + 1] = sg / nch;
                 lightC[3 * lightPos + 2] = sb / nch;
                 lightPos = (lightPos + 1) % lightT.length;
-                try {
+                for (int k = 0; k < strips.size(); k++) {
+                    try {
+                        strips.get(k).send(stripSock, stripRgb[k]);
+                    } catch (IOException e) {
+                        if (!running) break;
+                        // a strip that's switched off or out of Wi-Fi range shouldn't stop the rest
+                    }
+                }
+                if (hue) try {
                     dtls.send(stream.build(ch.ids, rgb));
                     failures = 0;
                 } catch (IOException e) {
@@ -362,7 +428,7 @@ public class SyncService extends Service {
                     SyncState.set(SyncState.Status.RUNNING, "");
                 }
 
-                float[] m = renderer.meanColor();
+                float[] m = renderer != null ? renderer.meanColor() : strips.get(0).renderer.meanColor();
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
@@ -413,6 +479,7 @@ public class SyncService extends Service {
             if (running) main.post(() -> shutdown(msg));
         } finally {
             running = false;
+            if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
             if (screen != null) screen.stop();
             if (dtls != null) dtls.close();
@@ -435,6 +502,24 @@ public class SyncService extends Service {
                 } catch (Exception ignored) {
                 }
             }
+        }
+    }
+
+    /** Hands the screen/camera colors (all outputs side by side) to each output's renderer. */
+    private static void distribute(float[] all, Renderer hueRenderer, float[] hueBuf, List<StripOutput> strips,
+                                   int[] stripOff, float[][] stripBuf) {
+        if (all == null) {
+            if (hueRenderer != null) hueRenderer.setScreenColors(null);
+            for (StripOutput so : strips) so.renderer.setScreenColors(null);
+            return;
+        }
+        if (hueRenderer != null) {
+            System.arraycopy(all, 0, hueBuf, 0, hueBuf.length);
+            hueRenderer.setScreenColors(hueBuf.clone());
+        }
+        for (int k = 0; k < strips.size(); k++) {
+            System.arraycopy(all, 3 * stripOff[k], stripBuf[k], 0, stripBuf[k].length);
+            strips.get(k).renderer.setScreenColors(stripBuf[k].clone());
         }
     }
 
@@ -584,8 +669,11 @@ public class SyncService extends Service {
             case Prefs.MODE_MIC: src = "microphone"; break;
             default: src = "phone audio";
         }
+        List<String> targets = new ArrayList<>();
+        if (prefs.isConfigured()) targets.add(prefs.areaName());
+        for (Strip st : prefs.strips()) if (st.enabled) targets.add(st.name);
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.notify(NOTIFICATION_ID, buildNotification("Syncing " + prefs.areaName() + " to " + src));
+        nm.notify(NOTIFICATION_ID, buildNotification("Syncing " + String.join(", ", targets) + " to " + src));
     }
 
     @SuppressWarnings("deprecation")

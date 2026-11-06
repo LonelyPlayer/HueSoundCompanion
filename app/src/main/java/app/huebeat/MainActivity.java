@@ -35,6 +35,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_PICK_APP = 3;
     private static final int REQ_SETUP = 4;
     private static final int REQ_EDIT_PALETTE = 5;
+    private static final int REQ_STRIP = 6;
+    private LinearLayout stripsBox;
     private LinearLayout palettesRow;
     private TextView screenChip;
     private boolean sessionHasScreen = false;
@@ -57,7 +59,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         super.onCreate(b);
         prefs = Prefs.get(this);
         buildUi();
-        if (!prefs.isConfigured() && b == null) {
+        if (!prefs.hasOutputs() && b == null) {
             startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
         }
     }
@@ -206,6 +208,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
         strobeRow.addView(strobe);
         root.addView(strobeRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
 
+        root.addView(section("LED strips"));
+        stripsBox = Ui.column(this);
+        root.addView(stripsBox);
+        rebuildStrips();
+
         footer = Ui.text(this, "", 13, Ui.SUB, false);
         footer.setGravity(Gravity.CENTER);
         root.addView(footer, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 26), 0, 0));
@@ -245,6 +252,48 @@ public class MainActivity extends Activity implements SyncState.Listener {
             }
         });
         return s;
+    }
+
+    private void rebuildStrips() {
+        stripsBox.removeAllViews();
+        List<Strip> all = prefs.strips();
+        for (int i = 0; i < all.size(); i++) {
+            final int idx = i;
+            Strip st = all.get(i);
+            LinearLayout r = Ui.row(this);
+            int p = Ui.dp(this, 12);
+            r.setPadding(Ui.dp(this, 14), p, Ui.dp(this, 8), p);
+            Ui.clickable(r, Ui.CARD, Ui.dp(this, 14));
+            TextView t = Ui.text(this, st.name + "\n" + st.leds + " LEDs · " + st.ip, 15, Ui.TEXT, true);
+            t.setLineSpacing(0, 1.15f);
+            r.addView(t, Ui.lp(0, Ui.WRAP, 1));
+            Switch on = new Switch(this);
+            on.setChecked(st.enabled);
+            on.setOnCheckedChangeListener((bv, checked) -> {
+                List<Strip> l = prefs.strips();
+                if (idx < l.size()) {
+                    l.get(idx).enabled = checked;
+                    prefs.saveStrips(l);
+                }
+                restartIfRunning();
+                refresh();
+            });
+            r.addView(on);
+            r.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
+                    .putExtra(StripSetupActivity.EXTRA_INDEX, idx), REQ_STRIP));
+            stripsBox.addView(r, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        }
+        TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
+        add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
+        stripsBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
+    }
+
+    /** Outputs changed while syncing: restart so the engine picks them up. */
+    private void restartIfRunning() {
+        if (SyncState.isActive()) {
+            SyncService.stop(this);
+            main.postDelayed(this::startFlow, 700);
+        }
     }
 
     private void rebuildPalettes() {
@@ -341,10 +390,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 break;
             default:
                 status.setTextColor(Ui.SUB);
-                status.setText(prefs.isConfigured() ? "Tap to sync your lights" : "Tap to connect your Hue bridge");
+                status.setText(prefs.hasOutputs() ? "Tap to sync your lights" : "Tap to connect your Hue bridge");
                 hint.setText("");
         }
-        footer.setText(prefs.isConfigured() ? prefs.bridgeName() + " · " + prefs.areaName() : "No bridge connected");
+        footer.setText(prefs.isConfigured() ? prefs.bridgeName() + " · " + prefs.areaName() : "No Hue bridge connected");
         if (SyncState.status == SyncState.Status.RUNNING) {
             // update BPM text a few times per second while running
             main.removeCallbacks(bpmTicker);
@@ -406,7 +455,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     }
 
     private void startFlow() {
-        if (!prefs.isConfigured()) {
+        if (!prefs.hasOutputs()) {
             startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
             return;
         }
@@ -489,6 +538,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
             if (pendingStart && resultCode == RESULT_OK) startFlow();
             pendingStart = false;
         } else if (requestCode == REQ_SETUP) {
+            refresh();
+        } else if (requestCode == REQ_STRIP) {
+            rebuildStrips();
+            if (resultCode == RESULT_OK) restartIfRunning();
             refresh();
         } else if (requestCode == REQ_EDIT_PALETTE) {
             if (resultCode == RESULT_OK && data != null) {

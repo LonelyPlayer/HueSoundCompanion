@@ -41,6 +41,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="HueSoundCompanion"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
         <activity
@@ -57,6 +58,10 @@
 
         <activity android:name=".SetupActivity" android:exported="false" />
         <activity android:name=".AppPickerActivity" android:exported="false" />
+        <activity
+            android:name=".StripSetupActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".CameraActivity"
             android:exported="false"

@@ -52,6 +52,16 @@ public final class HueApi {
     public static final class Channels {
         public int[] ids;
         public float[] x, y, z;
+
+        /** No Hue lights (only LED strips are used). */
+        public static Channels empty() {
+            Channels c = new Channels();
+            c.ids = new int[0];
+            c.x = new float[0];
+            c.y = new float[0];
+            c.z = new float[0];
+            return c;
+        }
     }
 
     /** Thrown while the link button has not been pressed yet. */

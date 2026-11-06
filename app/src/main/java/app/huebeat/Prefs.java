@@ -143,6 +143,37 @@ public final class Prefs {
         sp.edit().putString("areaId", id).putString("areaName", name).apply();
     }
 
+    // ------------------------------------------------------------------ LED strips
+
+    public java.util.List<Strip> strips() {
+        java.util.List<Strip> l = new java.util.ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(sp.getString("strips", "[]"));
+            for (int i = 0; i < a.length(); i++) l.add(Strip.fromJson(a.getJSONObject(i)));
+        } catch (JSONException ignored) {
+        }
+        return l;
+    }
+
+    public void saveStrips(java.util.List<Strip> l) {
+        JSONArray a = new JSONArray();
+        try {
+            for (Strip s : l) a.put(s.toJson());
+        } catch (JSONException ignored) {
+        }
+        sp.edit().putString("strips", a.toString()).apply();
+    }
+
+    public boolean hasEnabledStrips() {
+        for (Strip s : strips()) if (s.enabled) return true;
+        return false;
+    }
+
+    /** Something to send light to: a Hue bridge and/or an enabled LED strip. */
+    public boolean hasOutputs() {
+        return isConfigured() || hasEnabledStrips();
+    }
+
     // audio source
     public int mode() { return sp.getInt("mode", MODE_OUTPUT); }
     public void setMode(int m) { sp.edit().putInt("mode", m).apply(); }
