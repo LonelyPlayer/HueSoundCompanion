@@ -19,6 +19,11 @@ final class Strip {
     int effect = 0;        // StripEffect.LIGHTS
     float speed = 0.5f;
     int palette = -1;      // -1 = same as the lights
+    int variant = 0;       // LedFx effect option (e.g. Bar: wipe/bounce/in-out)
+    float blur = 0f;       // 0 = none
+    // ambient mode
+    int ambientEffect = -1;        // -1 = same as the lights, else Ambient.*
+    int ambientColor = 0xFF8A2A;
     // strobe overlay
     int strobeTrigger = 0; // off
     int strobeColor = 0xFFFFFF;
@@ -33,7 +38,9 @@ final class Strip {
                 .put("effect", effect).put("speed", (double) speed).put("palette", palette)
                 .put("strobeTrigger", strobeTrigger).put("strobeColor", strobeColor)
                 .put("strobeLength", (double) strobeLength).put("strobeCover", strobeCover)
-                .put("strobeAmount", (double) strobeAmount);
+                .put("strobeAmount", (double) strobeAmount)
+                .put("variant", variant).put("blur", (double) blur)
+                .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor);
     }
 
     /** Everything that needs a new network output when it changes. */
@@ -52,6 +59,10 @@ final class Strip {
         so.effect.strobeLength = strobeLength;
         so.effect.strobeCover = strobeCover;
         so.effect.strobeAmount = strobeAmount;
+        so.effect.variant = variant;
+        so.effect.blur = blur;
+        so.ambientEffect = ambientEffect;
+        so.ambientColor = ambientColor;
     }
 
     /** Builds the network output for this strip with its effect settings. */
@@ -82,6 +93,10 @@ final class Strip {
         s.strobeLength = (float) o.optDouble("strobeLength", 0.3);
         s.strobeCover = o.optInt("strobeCover", 0);
         s.strobeAmount = (float) o.optDouble("strobeAmount", 1.0);
+        s.variant = o.optInt("variant", 0);
+        s.blur = (float) o.optDouble("blur", 0.0);
+        s.ambientEffect = o.optInt("ambientEffect", -1);
+        s.ambientColor = o.optInt("ambientColor", 0xFF8A2A);
         return s;
     }
 }

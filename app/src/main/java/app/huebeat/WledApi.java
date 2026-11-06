@@ -46,4 +46,43 @@ final class WledApi {
             c.disconnect();
         }
     }
+
+    /** Puts per-LED colors on a WLED controller as a solid state, so they stay after streaming ends. */
+    static void setColors(String ip, int[] colors) throws IOException {
+        StringBuilder seg = new StringBuilder();
+        int i = 0;
+        while (i < colors.length) {
+            int j = i;
+            while (j + 1 < colors.length && colors[j + 1] == colors[i]) j++;
+            if (seg.length() > 0) seg.append(',');
+            seg.append(i).append(',').append(j + 1).append(",\"").append(String.format("%06X", colors[i] & 0xFFFFFF)).append('"');
+            i = j + 1;
+        }
+        String body;
+        if (seg.length() < 15000) {
+            body = "{\"on\":true,\"bri\":255,\"live\":false,\"seg\":[{\"id\":0,\"fx\":0,\"i\":[" + seg + "]}]}";
+        } else {
+            // too many different colors for one request: use the average
+            long r = 0, g = 0, b = 0;
+            for (int c : colors) {
+                r += (c >> 16) & 0xFF;
+                g += (c >> 8) & 0xFF;
+                b += c & 0xFF;
+            }
+            int n = Math.max(1, colors.length);
+            body = "{\"on\":true,\"bri\":255,\"live\":false,\"seg\":[{\"id\":0,\"fx\":0,\"col\":[[" + r / n + "," + g / n + "," + b / n + "]]}]}";
+        }
+        HttpURLConnection c = (HttpURLConnection) new URL("http://" + ip + "/json/state").openConnection();
+        c.setConnectTimeout(2500);
+        c.setReadTimeout(3000);
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json");
+        try (java.io.OutputStream os = c.getOutputStream()) {
+            os.write(body.getBytes("UTF-8"));
+        }
+        int code = c.getResponseCode();
+        c.disconnect();
+        if (code >= 400) throw new IOException("HTTP " + code);
+    }
 }

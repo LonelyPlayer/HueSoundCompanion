@@ -26,6 +26,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 
+import app.huebeat.core.Ambient;
 import app.huebeat.core.LightSettings;
 import app.huebeat.core.Palettes;
 import app.huebeat.core.StripEffect;
@@ -54,6 +55,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private final List<TextView> styleChips = new ArrayList<>();
     private final List<TextView> paletteChips = new ArrayList<>();
     private boolean pendingStart = false;
+    private boolean askedNotif = false;
+    private final List<TextView> appModeChips = new ArrayList<>();
+    private LinearLayout musicTop, musicLook, ambientLook, lightsList, lampBox;
+    private TextView ambAnimBtn, ambColorBtn;
+    private String shownNames = null;
+    private boolean fetchingNames = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -104,8 +111,23 @@ public class MainActivity extends Activity implements SyncState.Listener {
         header.addView(setup);
         root.addView(header, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, Ui.dp(this, 18)));
 
+        // what the app does: follow music, or just light the room
+        LinearLayout appModes = Ui.row(this);
+        String[] appModeNames = {"Music sync", "Just lights"};
+        for (int i = 0; i < 2; i++) {
+            final int m = i;
+            TextView chip = Ui.chip(this, appModeNames[i]);
+            chip.setOnClickListener(v -> onAppModeSelected(m));
+            appModeChips.add(chip);
+            appModes.addView(chip, Ui.margins(Ui.lp(0, Ui.WRAP, 1), i == 0 ? 0 : Ui.dp(this, 4), 0, i == 1 ? 0 : Ui.dp(this, 4), 0));
+        }
+        root.addView(appModes, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 4)));
+
         // audio source
-        root.addView(section("Listen to"));
+        musicTop = Ui.column(this);
+        root.addView(musicTop);
+        LinearLayout top = musicTop;
+        top.addView(section("Listen to"));
         LinearLayout modes = Ui.row(this);
         String[] modeNames = {"Phone audio", "One app", "Microphone"};
         for (int i = 0; i < 3; i++) {
@@ -115,7 +137,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             modeChips.add(chip);
             modes.addView(chip, Ui.margins(Ui.lp(0, Ui.WRAP, 1), i == 0 ? 0 : Ui.dp(this, 4), 0, i == 2 ? 0 : Ui.dp(this, 4), 0));
         }
-        root.addView(modes);
+        top.addView(modes);
 
         appRowBox = Ui.row(this);
         appRowBox.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
@@ -125,7 +147,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         TextView change = Ui.text(this, "Change", 14, Ui.ACCENT, true);
         appRowBox.addView(change);
         appRowBox.setOnClickListener(v -> startActivityForResult(new Intent(this, AppPickerActivity.class), REQ_PICK_APP));
-        root.addView(appRowBox, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+        top.addView(appRowBox, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
 
         // the big button
         power = new PowerButton(this);
@@ -145,7 +167,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         root.addView(hint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 18)));
 
         // style
-        LinearLayout look = collapsible(root, "Look", "open_look", true);
+        musicLook = Ui.column(this);
+        root.addView(musicLook);
+        LinearLayout look = collapsible(musicLook, "Look", "open_look", true);
         look.addView(section("Style"));
         HorizontalScrollView styleScroll = new HorizontalScrollView(this);
         styleScroll.setHorizontalScrollBarEnabled(false);
@@ -203,6 +227,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
         strobeRow.addView(strobe);
         look.addView(strobeRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
 
+        ambientLook = Ui.column(this);
+        root.addView(ambientLook);
+        buildAmbient(collapsible(ambientLook, "Lights", "open_ambient", true));
+
         LinearLayout stripsSection = collapsible(root, "LED strips", "open_strips", true);
         stripsBox = Ui.column(this);
         stripsSection.addView(stripsBox);
@@ -219,8 +247,195 @@ public class MainActivity extends Activity implements SyncState.Listener {
         footer = Ui.text(this, "", 13, Ui.SUB, false);
         footer.setGravity(Gravity.CENTER);
         root.addView(footer, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 26), 0, 0));
+        TextView credits = Ui.text(this, "Free software (GPL-3.0). Strip effects and some animations ported from LedFx, © the LedFx developers. Tap for source.", 11, Ui.SUB, false);
+        credits.setGravity(Gravity.CENTER);
+        credits.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), 0);
+        credits.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/LonelyPlayer/HueSoundCompanion")));
+            } catch (Exception ignored) {
+            }
+        });
+        root.addView(credits, Ui.lp(Ui.MATCH, Ui.WRAP));
 
         Ui.setupWindow(this, scroll);
+    }
+
+    // ------------------------------------------------------------------ just lights
+
+    private static String[] withSame(String[] names) {
+        String[] o = new String[names.length + 1];
+        o[0] = "Same as lights";
+        System.arraycopy(names, 0, o, 1, names.length);
+        return o;
+    }
+
+    private static String[] withSameCat(String[] cats) {
+        String[] o = new String[cats.length + 1];
+        o[0] = "";
+        System.arraycopy(cats, 0, o, 1, cats.length);
+        return o;
+    }
+
+    private TextView pickerButton(String text) {
+        TextView t = Ui.text(this, text, 15, Ui.TEXT, true);
+        t.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
+        t.setCompoundDrawablePadding(Ui.dp(this, 10));
+        Ui.clickable(t, Ui.CARD_2, Ui.dp(this, 14));
+        return t;
+    }
+
+    private void setDot(TextView t, int rgb) {
+        t.setCompoundDrawablesRelative(Pickers.dot(this, rgb, 18), null, null, null);
+    }
+
+    private static String[] paletteNames() {
+        String[] pal = new String[Palettes.count()];
+        for (int k = 0; k < pal.length; k++) pal[k] = Palettes.name(k);
+        return pal;
+    }
+
+    private void buildAmbient(LinearLayout box) {
+        Ambient.Settings a = prefs.ambient;
+        box.addView(section("Animation"));
+        ambAnimBtn = pickerButton(Ambient.NAMES[a.animation] + "  ▸");
+        ambAnimBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", Ambient.NAMES, Ambient.CATEGORIES, a.animation, k -> {
+            a.animation = k;
+            prefs.saveAmbient();
+            ambAnimBtn.setText(Ambient.NAMES[k] + "  ▸");
+            rebuildStrips();
+            refresh();
+        }));
+        box.addView(ambAnimBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+
+        box.addView(section("Colors"));
+        box.addView(Ui.chipRow(this, paletteNames(), () -> a.palette, v -> {
+            a.palette = v;
+            prefs.saveAmbient();
+        }));
+        ambColorBtn = pickerButton("Main color");
+        setDot(ambColorBtn, a.color);
+        ambColorBtn.setOnClickListener(v -> Pickers.color(this, "Main color", a.color, c -> {
+            a.color = c;
+            prefs.saveAmbient();
+            setDot(ambColorBtn, c);
+        }));
+        box.addView(ambColorBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+
+        lampBox = Ui.column(this);
+        lampBox.addView(section("Each lamp"));
+        TextView lh = Ui.text(this, "Tap a lamp to give it its own color.", 13, Ui.SUB, false);
+        lampBox.addView(lh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
+        lightsList = Ui.column(this);
+        lampBox.addView(lightsList);
+        box.addView(lampBox);
+
+        box.addView(section("Speed"));
+        box.addView(Ui.slider(this, a.speed, v -> {
+            a.speed = v;
+            prefs.saveAmbient();
+        }));
+        box.addView(section("Brightness"));
+        box.addView(Ui.slider(this, a.brightness, v -> {
+            a.brightness = Math.max(0.02f, v);
+            prefs.saveAmbient();
+        }));
+
+        LinearLayout keepRow = Ui.row(this);
+        TextView kt = Ui.text(this, "Keep the colors when turned off", 15, Ui.TEXT, false);
+        keepRow.addView(kt, Ui.lp(0, Ui.WRAP, 1));
+        Switch keep = new Switch(this);
+        keep.setChecked(prefs.keepColors());
+        keep.setOnCheckedChangeListener((bv, on) -> prefs.setKeepColors(on));
+        keepRow.addView(keep);
+        box.addView(keepRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
+        rebuildLamps();
+    }
+
+    /** The per-lamp color list (names come from the bridge and are cached). */
+    private void rebuildLamps() {
+        if (lightsList == null) return;
+        String names = prefs.channelNames();
+        if (names.equals(shownNames)) return;
+        shownNames = names;
+        lightsList.removeAllViews();
+        if (!prefs.isConfigured()) {
+            lightsList.addView(Ui.text(this, "No Hue bridge connected.", 14, Ui.SUB, false));
+            return;
+        }
+        if (names.isEmpty()) {
+            lightsList.addView(Ui.text(this, "Loading lamps…", 14, Ui.SUB, false));
+            fetchLampNames();
+            return;
+        }
+        for (String line : names.split("\n")) {
+            int eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            final int channel;
+            try {
+                channel = Integer.parseInt(line.substring(0, eq));
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            String name = line.substring(eq + 1);
+            TextView row = pickerButton(name);
+            Integer c0 = prefs.lightColors.get(channel);
+            setDot(row, c0 != null ? c0 : prefs.ambient.color);
+            row.setOnClickListener(v -> {
+                Integer cur = prefs.lightColors.get(channel);
+                Pickers.color(this, name, cur != null ? cur : prefs.ambient.color, c -> {
+                    prefs.setLightColor(channel, c);
+                    setDot(row, c);
+                });
+            });
+            lightsList.addView(row, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
+        }
+    }
+
+    private void fetchLampNames() {
+        if (fetchingNames) return;
+        fetchingNames = true;
+        final String ip = prefs.bridgeIp(), user = prefs.username(), area = prefs.areaId();
+        new Thread(() -> {
+            String result = null;
+            try {
+                StringBuilder sb = new StringBuilder();
+                for (HueApi.ChannelLight cl : HueApi.channelLights(ip, user, area)) {
+                    sb.append(cl.channel).append('=').append(cl.name.replace('\n', ' ')).append('\n');
+                }
+                result = sb.toString();
+            } catch (Exception ignored) {
+            }
+            final String r = result;
+            main.post(() -> {
+                fetchingNames = false;
+                if (isFinishing()) return;
+                if (r != null && !r.isEmpty()) {
+                    prefs.setChannelNames(r);
+                    rebuildLamps();
+                } else {
+                    lightsList.removeAllViews();
+                    lightsList.addView(Ui.text(this, "Couldn't reach the bridge to list the lamps.", 14, Ui.SUB, false));
+                    shownNames = null;
+                }
+            });
+        }, "lamp-names").start();
+    }
+
+    private void onAppModeSelected(int m) {
+        if (m == prefs.appMode()) return;
+        boolean wasActive = SyncState.isActive();
+        prefs.setAppMode(m);
+        rebuildStrips();
+        refresh();
+        if (wasActive) {
+            SyncService.stop(this);
+            main.postDelayed(this::startFlow, 900);
+        }
+    }
+
+    private boolean ambientMode() {
+        return prefs.appMode() == Prefs.APP_AMBIENT;
     }
 
     private TextView section(String label) {
@@ -318,7 +533,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
             chev.setPadding(0, 0, Ui.dp(this, 10), 0);
             head.addView(chev);
-            TextView t = Ui.text(this, st.name + "\n" + st.leds + " LEDs · " + StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)], 15, Ui.TEXT, true);
+            TextView t = Ui.text(this, stripTitle(st), 15, Ui.TEXT, true);
             t.setLineSpacing(0, 1.15f);
             head.addView(t, Ui.lp(0, Ui.WRAP, 1));
             TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
@@ -348,15 +563,55 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 chev.setText(o ? "▾" : "▸");
                 ui.edit().putBoolean(key, o).apply();
             });
-            body.addView(Ui.label(this, "Effect"));
-            body.addView(Ui.chipRow(this, StripEffect.NAMES, () -> st.effect, v -> {
-                st.effect = v;
-                saveStrips();
-                t.setText(st.name + "\n" + st.leds + " LEDs · " + StripEffect.NAMES[v]);
-            }));
+            final boolean amb = ambientMode();
+            if (amb) {
+                body.addView(Ui.label(this, "Animation"));
+                TextView animBtn = pickerButton(stripAmbientName(st) + "  ▸");
+                animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
+                        st.ambientEffect + 1, k -> {
+                            st.ambientEffect = k - 1;
+                            saveStrips();
+                            animBtn.setText(stripAmbientName(st) + "  ▸");
+                            t.setText(stripTitle(st));
+                        }));
+                body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+                TextView colBtn = pickerButton("Strip color");
+                setDot(colBtn, st.ambientColor);
+                colBtn.setOnClickListener(v -> Pickers.color(this, "Strip color", st.ambientColor, c -> {
+                    st.ambientColor = c;
+                    saveStrips();
+                    setDot(colBtn, c);
+                }));
+                body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            } else {
+                body.addView(Ui.label(this, "Effect"));
+                LinearLayout variantBox = Ui.column(this);
+                TextView fxBtn = pickerButton(StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)] + "  ▸");
+                fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", StripEffect.NAMES, StripEffect.CATEGORIES, st.effect, k -> {
+                    st.effect = k;
+                    st.variant = 0;
+                    saveStrips();
+                    rebuildStrips();
+                }));
+                body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+                String[] vars = StripEffect.variants(st.effect);
+                if (vars != null && vars.length > 1) {
+                    variantBox.addView(Ui.label(this, "Variant"));
+                    variantBox.addView(Ui.chipRow(this, vars, () -> st.variant, v -> {
+                        st.variant = v;
+                        saveStrips();
+                    }));
+                }
+                body.addView(variantBox);
+            }
             body.addView(Ui.label(this, "Speed"));
             body.addView(Ui.slider(this, st.speed, v -> {
                 st.speed = v;
+                saveStrips();
+            }));
+            body.addView(Ui.label(this, "Blur"));
+            body.addView(Ui.slider(this, st.blur, v -> {
+                st.blur = v;
                 saveStrips();
             }));
             body.addView(Ui.label(this, "Colors"));
@@ -373,6 +628,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 saveStrips();
             }));
 
+            if (!amb) {
             body.addView(Ui.label(this, "Strobe overlay"));
             TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
             body.addView(sh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
@@ -406,6 +662,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
             strobeBox.setVisibility(st.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
             body.addView(strobeBox);
+            }
             card.addView(body);
 
             stripsBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
@@ -413,6 +670,17 @@ public class MainActivity extends Activity implements SyncState.Listener {
         TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
         stripsBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+    }
+
+    private String stripAmbientName(Strip st) {
+        return st.ambientEffect < 0 ? "Same as lights" : Ambient.NAMES[Math.min(st.ambientEffect, Ambient.NAMES.length - 1)];
+    }
+
+    private String stripTitle(Strip st) {
+        String what = ambientMode()
+                ? (st.ambientEffect < 0 ? Ambient.NAMES[prefs.ambient.animation] : stripAmbientName(st))
+                : StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)];
+        return st.name + "\n" + st.leds + " LEDs · " + what;
     }
 
     /** Outputs changed while syncing: restart so the engine picks them up. */
@@ -481,6 +749,15 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private void refresh() {
         int mode = prefs.mode();
+        boolean amb = ambientMode();
+        for (int i = 0; i < appModeChips.size(); i++) Ui.setChipSelected(appModeChips.get(i), i == prefs.appMode());
+        musicTop.setVisibility(amb ? View.GONE : View.VISIBLE);
+        musicLook.setVisibility(amb ? View.GONE : View.VISIBLE);
+        ambientLook.setVisibility(amb ? View.VISIBLE : View.GONE);
+        if (amb) {
+            lampBox.setVisibility(prefs.ambient.animation == Ambient.STATIC ? View.VISIBLE : View.GONE);
+            rebuildLamps();
+        }
         for (int i = 0; i < modeChips.size(); i++) Ui.setChipSelected(modeChips.get(i), i == mode);
         for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), i == prefs.light.style);
         boolean screenCols = prefs.light.screenColors;
@@ -493,16 +770,16 @@ public class MainActivity extends Activity implements SyncState.Listener {
         String label = prefs.appLabel();
         appRow.setText(label == null ? "Choose the app to follow" : "Following: " + label);
         strobeRow.setVisibility(prefs.light.style == LightSettings.STYLE_PARTY ? View.VISIBLE : View.GONE);
-        delayLabel.setVisibility(mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
-        delayBar.setVisibility(mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
+        delayLabel.setVisibility(amb || mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
+        delayBar.setVisibility(amb || mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
         updateDelayLabel();
 
-        meter.setVisibility(SyncState.status == SyncState.Status.RUNNING ? View.VISIBLE : View.INVISIBLE);
+        meter.setVisibility(!amb && SyncState.status == SyncState.Status.RUNNING ? View.VISIBLE : View.INVISIBLE);
         meter.invalidate();
         switch (SyncState.status) {
             case RUNNING:
                 status.setTextColor(Ui.TEXT);
-                status.setText(SyncState.bpm > 0 ? "Syncing · " + Math.round(SyncState.bpm) + " BPM" : "Syncing");
+                status.setText(amb ? "Lights on" : SyncState.bpm > 0 ? "Syncing · " + Math.round(SyncState.bpm) + " BPM" : "Syncing");
                 hint.setText(SyncState.hint);
                 break;
             case STARTING:
@@ -517,11 +794,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 break;
             default:
                 status.setTextColor(Ui.SUB);
-                status.setText(prefs.hasOutputs() ? "Tap to sync your lights" : "Tap to connect your Hue bridge");
+                status.setText(!prefs.hasOutputs() ? "Tap to connect your Hue bridge"
+                        : amb ? "Tap to turn your lights on" : "Tap to sync your lights");
                 hint.setText("");
         }
         footer.setText(prefs.isConfigured() ? prefs.bridgeName() + " · " + prefs.areaName() : "No Hue bridge connected");
-        if (SyncState.status == SyncState.Status.RUNNING) {
+        if (SyncState.status == SyncState.Status.RUNNING && !amb) {
             // update BPM text a few times per second while running
             main.removeCallbacks(bpmTicker);
             main.postDelayed(bpmTicker, 500);
@@ -586,6 +864,16 @@ public class MainActivity extends Activity implements SyncState.Listener {
             startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
             return;
         }
+        if (ambientMode()) {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    && !askedNotif) {
+                askedNotif = true;
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_PERMS);
+                return;
+            }
+            launchService(0, null);
+            return;
+        }
         if (prefs.mode() == Prefs.MODE_APP && prefs.appPackage() == null) {
             pendingStart = true;
             startActivityForResult(new Intent(this, AppPickerActivity.class), REQ_PICK_APP);
@@ -629,7 +917,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         SyncState.set(SyncState.Status.STARTING, "Starting…");
         Intent i = new Intent(this, SyncService.class)
                 .setAction(SyncService.ACTION_START)
-                .putExtra(SyncService.EXTRA_MODE, prefs.mode());
+                .putExtra(SyncService.EXTRA_MODE, ambientMode() ? Prefs.MODE_AMBIENT : prefs.mode());
         if (data != null) {
             i.putExtra(SyncService.EXTRA_RESULT_CODE, resultCode);
             i.putExtra(SyncService.EXTRA_RESULT_DATA, data);
@@ -646,6 +934,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         if (requestCode != REQ_PERMS) return;
+        if (ambientMode()) {
+            startFlow();
+            return;
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startFlow();
         } else {

@@ -24,6 +24,12 @@ public final class StripOutput {
     public final float[] segX;
     public final Renderer renderer;
     public final StripEffect effect;
+    /** Ambient mode: the strip's own animation (-1 = same as the lights) and color. */
+    public volatile int ambientEffect = -1;
+    public volatile int ambientColor = 0xFF8A2A;
+    private Ambient ambient;
+    private final Ambient.Settings ambientOwn = new Ambient.Settings();
+
     /** The strip's own palette, or -1 to use the lights' palette (and screen colors). */
     public volatile int palette = -1;
     private final LightSettings own = new LightSettings();
@@ -84,8 +90,33 @@ public final class StripOutput {
             float[] px = effect.render(f, dt, s);
             System.arraycopy(px, 0, logical, 0, logical.length);
         }
+        float b = effect.blur;
+        if (b > 0.005f) LedFx.blurRgb(logical, span, 10f * b * b + 0.5f * b);
         effect.strobeOnly(logical, f, dt);
         return logical;
+    }
+
+    /** Ambient mode frame: the lights' animation or the strip's own, in its palette and color. */
+    public float[] renderAmbient(float dt, Ambient.Settings lights) {
+        if (ambient == null) ambient = new Ambient(Ambient.line(span), true);
+        ambientOwn.copyFrom(lights);
+        if (ambientEffect >= 0) ambientOwn.animation = ambientEffect;
+        if (palette >= 0) ambientOwn.palette = palette;
+        ambientOwn.color = ambientColor;
+        ambientOwn.speed = effect.speed;
+        float[] px = ambient.render(dt, ambientOwn, null);
+        System.arraycopy(px, 0, logical, 0, logical.length);
+        float b = effect.blur;
+        if (b > 0.005f) LedFx.blurRgb(logical, span, 10f * b * b + 0.5f * b);
+        return logical;
+    }
+
+    /** The last frame mapped onto the physical LEDs (0xRRGGBB each), e.g. to keep it after stopping. */
+    public int[] physicalColors() {
+        byte[] px = buildPixels(logical);
+        int[] c = new int[leds];
+        for (int i = 0; i < leds; i++) c[i] = ((px[3 * i] & 0xFF) << 16) | ((px[3 * i + 1] & 0xFF) << 8) | (px[3 * i + 2] & 0xFF);
+        return c;
     }
 
     /** Shows one plain color (used during the room-light calibration). */

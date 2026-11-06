@@ -16,11 +16,18 @@ import app.huebeat.core.Palettes;
 /** Persistent settings plus the live {@link LightSettings} shared with the streaming engine. */
 public final class Prefs {
     public static final int MODE_OUTPUT = 0, MODE_APP = 1, MODE_MIC = 2;
+    /** Service mode for Ambient (no sound). */
+    public static final int MODE_AMBIENT = 3;
+    public static final int APP_MUSIC = 0, APP_AMBIENT = 1;
 
     private static Prefs instance;
 
     private final SharedPreferences sp;
     public final LightSettings light = new LightSettings();
+    /** Ambient mode settings for the Hue lights (strips can follow or override them). */
+    public final app.huebeat.core.Ambient.Settings ambient = new app.huebeat.core.Ambient.Settings();
+    /** Per Hue channel colors for "Static colors" (channel id → 0xRRGGBB); replaced as a whole. */
+    public volatile java.util.Map<Integer, Integer> lightColors = new java.util.HashMap<>();
 
     private Prefs(Context c) {
         sp = c.getApplicationContext().getSharedPreferences("huebeat", Context.MODE_PRIVATE);
@@ -31,6 +38,22 @@ public final class Prefs {
         light.maxBrightness = sp.getFloat("maxBrightness", 1f);
         light.strobe = sp.getBoolean("strobe", false);
         light.screenColors = sp.getBoolean("screenColors", false);
+        ambient.animation = sp.getInt("amb_anim", app.huebeat.core.Ambient.PALETTE);
+        ambient.palette = sp.getInt("amb_palette", 1);
+        ambient.color = sp.getInt("amb_color", 0xFF8A2A);
+        ambient.speed = sp.getFloat("amb_speed", 0.5f);
+        ambient.brightness = sp.getFloat("amb_bright", 1f);
+        try {
+            JSONObject lc = new JSONObject(sp.getString("light_colors", "{}"));
+            java.util.Map<Integer, Integer> m = new java.util.HashMap<>();
+            java.util.Iterator<String> it = lc.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                m.put(Integer.parseInt(k), lc.getInt(k));
+            }
+            lightColors = m;
+        } catch (Exception ignored) {
+        }
         loadCustomPalettes();
         // New built-in palettes push the user's own ones back; keep the same one selected.
         int oldBuiltIn = sp.getInt("builtInPalettes", 7);
@@ -121,6 +144,33 @@ public final class Prefs {
                 .putBoolean("screenColors", light.screenColors)
                 .apply();
     }
+
+    public void saveAmbient() {
+        sp.edit().putInt("amb_anim", ambient.animation).putInt("amb_palette", ambient.palette)
+                .putInt("amb_color", ambient.color).putFloat("amb_speed", ambient.speed)
+                .putFloat("amb_bright", ambient.brightness).apply();
+    }
+
+    public void setLightColor(int channel, int rgb) {
+        java.util.Map<Integer, Integer> m = new java.util.HashMap<>(lightColors);
+        m.put(channel, rgb);
+        lightColors = m;
+        JSONObject o = new JSONObject();
+        try {
+            for (java.util.Map.Entry<Integer, Integer> e : m.entrySet()) o.put(String.valueOf(e.getKey()), e.getValue());
+        } catch (JSONException ignored) {
+        }
+        sp.edit().putString("light_colors", o.toString()).apply();
+    }
+
+    public int appMode() { return sp.getInt("app_mode", APP_MUSIC); }
+    public void setAppMode(int m) { sp.edit().putInt("app_mode", m).apply(); }
+    public boolean keepColors() { return sp.getBoolean("keep_colors", true); }
+    public void setKeepColors(boolean k) { sp.edit().putBoolean("keep_colors", k).apply(); }
+
+    /** Cached Hue light names per channel (from the bridge), as "id=name" lines. */
+    public String channelNames() { return sp.getString("channel_names", ""); }
+    public void setChannelNames(String s) { sp.edit().putString("channel_names", s).apply(); }
 
     // bridge
     public String bridgeIp() { return sp.getString("bridgeIp", null); }

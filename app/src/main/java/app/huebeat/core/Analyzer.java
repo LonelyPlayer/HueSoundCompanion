@@ -265,6 +265,30 @@ public final class Analyzer {
             }
         }
 
+        // dominant pitch (for LedFx's Pitch Spectrum): strongest peak between 80 Hz and 1.5 kHz
+        {
+            int lo = Math.max(2, Math.round(80f / binHz)), hi = Math.min(nBins - 2, Math.round(1500f / binHz));
+            int best = -1;
+            float bestM = 0f, sumM = 0f;
+            for (int i = lo; i <= hi; i++) {
+                sumM += mag[i];
+                if (mag[i] > bestM) {
+                    bestM = mag[i];
+                    best = i;
+                }
+            }
+            float meanM = sumM / Math.max(1, hi - lo + 1);
+            if (!silent && best > 0 && bestM > meanM * 4f) {
+                float a = mag[best - 1], b = mag[best], c = mag[best + 1];
+                float den = a - 2 * b + c;
+                float off = Math.abs(den) > 1e-9f ? 0.5f * (a - c) / den : 0f;
+                float freq = (best + Math.max(-0.5f, Math.min(0.5f, off))) * binHz;
+                cur.pitch = 69f + 12f * (float) (Math.log(freq / 440.0) / Math.log(2));
+            } else {
+                cur.pitch = 0f;
+            }
+        }
+
         // brightness of the sound
         double num = 0, den = 0;
         for (int i = centLo; i < centHi; i++) {

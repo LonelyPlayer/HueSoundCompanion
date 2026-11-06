@@ -1,6 +1,6 @@
 # HueSoundCompanion
 
-Music sync for Philips Hue that listens to **everything your phone plays** (speaker or Bluetooth), **one app**, or the **microphone**, and streams colors to your lights through the Hue Entertainment API. No Sync Box, no cloud, no extra libraries.
+Music sync for Philips Hue and LED strips that listens to **everything your phone plays** (speaker or Bluetooth), **one app**, or the **microphone**, and streams colors to your lights through the Hue Entertainment API. No Sync Box, no cloud. It also has a **Just lights** mode for everyday lighting without music.
 
 ## What it does
 
@@ -18,11 +18,17 @@ Music sync for Philips Hue that listens to **everything your phone plays** (spea
 - **TV camera:** point the phone at your TV (tap **TV camera** in the Colors row). The app finds the TV with an on-device object detector (Google MediaPipe, "tv" class), fits the corners to the TV's edges, follows it when the phone moves (slide, tilt, zoom) by tracking points around the TV, and sends its colors to the lights; you can also drag the four corners. **Calibrate room light** (with the TV paused on a still image) measures how much the Hue lights themselves shine onto the screen and with what delay, and removes that glow from the colors. Nothing is recorded. The camera screen must stay open; it dims itself after 15 s.
 - **Screen colors:** the **Screen** chip in the Colors row keeps any music style's rhythm but takes the colors from the phone screen. Protected video (Netflix etc.) shows as black to apps, so it can't drive the lights.
 - **LED strips (ESP32 / ESP8266):** add WLED controllers (found automatically on the Wi-Fi) or any firmware that speaks **DDP**, **E1.31/sACN** or **WLED UDP**, the same protocols LedFx uses. The phone sends directly, no server needed. Strips follow the same styles, palettes, screen and TV camera colors as the Hue lights, with optional mirror-from-center, reverse and brightness. They work with or without a Hue bridge.
-  - **Effects per strip:** Like the lights, Equalizer (bars with falling peaks), Spectrum, Scroll, Energy, Fireworks, Rain, Fire, with a speed setting.
+  - **43 effects per strip:** the app's own (Like the lights, Equalizer Peaks, Spectrum Glow, Flow, Energy Bars, Fireworks, Drops, Campfire) plus all 35 one-dimensional audio-reactive effects of LedFx 2.2.1, ported to Java (Bands, Bar, Blade Power+, Block Reflections, Blocks, BPM Strobe, Crawler, Energy, Energy 2, Equalizer, Filter, Fire, Glitch, Hierarchy, Lava lamp, Magnitude, Marching, Melt, Melt and Sparkle, Metro, Multicolor Bar, Pitch Spectrum, Power, Rain, Scan, Scan and Flare, Scan Multi, Scroll, Scroll+, Spectrum, Spotlight, Strobe, VuMeter, Water, Wavelength). Effects are grouped by category in a picker; LedFx effects with a main option (e.g. Bar: wipe/bounce/in-out) offer it as **Variant**.
+  - **Speed** and **Blur** (0 = sharp; higher values soften the LEDs into each other) per strip.
   - **Own palette per strip**, or "Same as lights".
   - **Strobe overlay:** flashes in its own color (white, red, blue, UV, …) on the kick, snare/hi-hats, every 4th beat or only big hits, over the whole strip, in blocks or as sparkles, while the effect keeps showing the music underneath. Adjustable length and strength.
 - **Colors:** Auto (from the music), 7 built-in palettes (incl. Synthwave), and your own palettes (tap **+ New**; long-press one of yours to edit or delete it). Every palette is a looping color ramp: beats move a playhead along it (gliding in time with the tempo) and loudness pushes it further, so drops land on different colors. **Color movement** sets how far.
 - **Intensity** sets how hard and fast the lights react: low = soft swells that fade over the whole beat, high = sharp hits that drop to near-black between beats.
+- **Just lights mode** (switch at the top): no music, no screen sharing. Control all Hue lamps and strips with
+  - static colors, with **each lamp's own color** (color picker with hue/saturation/brightness and quick picks),
+  - a palette spread over the room, a single color, or one of the animations: Gradient, Fade, Rainbow, Random Flash, Pixels (from LedFx), and new ones: **Candles** (independent flickering per lamp), **Fireplace**, Breathing, Aurora, Ocean, Thunderstorm, Starry night, Color loop, Lava and Party,
+  - speed and brightness; each strip can follow the lamps' animation or run its own, in its own color and palette,
+  - **Keep the colors when turned off:** when you stop, the last colors are written to the lamps (normal Hue API) and to WLED strips, so the light stays as it is.
 - **Light delay** slider, remembered separately for the phone speaker and Bluetooth (Bluetooth audio usually arrives 150–300 ms late).
 
 ## Install on your phone (no PC needed)
@@ -67,9 +73,18 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 | `core/TvTracker.java` | Edge-fitted TV corners and keyframe point tracking for camera mode |
 | `TvMl.java` | MediaPipe TV detector (model downloaded by the cloud build) |
 | `core/StripProtocol.java` | DDP, E1.31 and WLED UDP packets |
+| `core/LedFx.java` | Java ports of the LedFx 2.2.1 1D audio effects (GPL-3.0) |
+| `core/StripEffect.java` | Effect registry: the app's own strip effects plus the LedFx ports, strobe overlay |
+| `core/Ambient.java` | Just-lights animations (palette, candles, fireplace, aurora, …) |
 | `core/StripOutput.java` | Renders effects on strip segments, interpolates to every LED, gamma, sends |
 | `StripSetupActivity.java` | WLED discovery (mDNS + /json/info) and strip settings |
 | `SyncService.java` | Foreground service: audio capture → analysis → 50 packets/s to the bridge |
 | `HueApi.java` | Bridge discovery, pairing, entertainment areas, start/stop |
+
+## License and credits
+
+HueSoundCompanion is free software under the **GNU General Public License v3.0** (see `LICENSE`).
+
+The strip effects in `core/LedFx.java`, the Gradient/Fade/Rainbow/Random Flash/Pixels animations and the rain droplet shape are ported from **[LedFx](https://github.com/LedFx/LedFx)** (v2.2.1), © the LedFx developers, licensed under GPL-3.0. Thank you to the LedFx project. TV detection uses Google MediaPipe (Apache 2.0) with the EfficientDet-Lite0 model.
 
 Requires Android 10 or newer and a Hue Bridge (square, v2) or Hue Bridge Pro.

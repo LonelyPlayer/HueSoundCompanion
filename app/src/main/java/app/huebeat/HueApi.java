@@ -265,6 +265,102 @@ public final class HueApi {
         }
     }
 
+    /** Name and light resource id behind every channel of an entertainment area. */
+    public static final class ChannelLight {
+        public int channel;
+        public String name = "";
+        public String lightId;
+    }
+
+    public static List<ChannelLight> channelLights(String ip, String appKey, String areaId) throws IOException {
+        List<ChannelLight> out = new ArrayList<>();
+        try {
+            JSONObject cfg = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment_configuration/" + areaId, appKey, null, true));
+            checkErrors(cfg);
+            JSONObject ents = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment", appKey, null, true));
+            JSONObject devs = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/device", appKey, null, true));
+            java.util.Map<String, String> entOwner = new java.util.HashMap<>();
+            JSONArray ed = ents.getJSONArray("data");
+            for (int i = 0; i < ed.length(); i++) {
+                JSONObject e = ed.getJSONObject(i);
+                JSONObject owner = e.optJSONObject("owner");
+                if (owner != null) entOwner.put(e.getString("id"), owner.optString("rid"));
+            }
+            java.util.Map<String, String> devName = new java.util.HashMap<>(), devLight = new java.util.HashMap<>();
+            JSONArray dd = devs.getJSONArray("data");
+            for (int i = 0; i < dd.length(); i++) {
+                JSONObject d = dd.getJSONObject(i);
+                JSONObject meta = d.optJSONObject("metadata");
+                devName.put(d.getString("id"), meta != null ? meta.optString("name", "") : "");
+                JSONArray sv = d.optJSONArray("services");
+                if (sv == null) continue;
+                for (int k = 0; k < sv.length(); k++) {
+                    JSONObject x = sv.getJSONObject(k);
+                    if ("light".equals(x.optString("rtype"))) devLight.put(d.getString("id"), x.optString("rid"));
+                }
+            }
+            JSONArray chans = cfg.getJSONArray("data").getJSONObject(0).getJSONArray("channels");
+            java.util.Map<String, Integer> perDevice = new java.util.HashMap<>();
+            for (int i = 0; i < chans.length(); i++) {
+                JSONObject ch = chans.getJSONObject(i);
+                ChannelLight cl = new ChannelLight();
+                cl.channel = ch.getInt("channel_id");
+                JSONArray mem = ch.optJSONArray("members");
+                if (mem != null && mem.length() > 0) {
+                    JSONObject svc = mem.getJSONObject(0).optJSONObject("service");
+                    String dev = svc != null ? entOwner.get(svc.optString("rid")) : null;
+                    if (dev != null) {
+                        cl.name = devName.containsKey(dev) ? devName.get(dev) : "";
+                        cl.lightId = devLight.get(dev);
+                        Integer seen = perDevice.get(dev);
+                        perDevice.put(dev, seen == null ? 1 : seen + 1);
+                    }
+                }
+                if (cl.name.isEmpty()) cl.name = "Light " + (i + 1);
+                out.add(cl);
+            }
+            // gradient lights have several channels: number them
+            java.util.Map<String, Integer> idx = new java.util.HashMap<>();
+            for (ChannelLight cl : out) {
+                if (cl.lightId == null) continue;
+                int total = 0;
+                for (ChannelLight o : out) if (cl.lightId.equals(o.lightId)) total++;
+                if (total > 1) {
+                    int k = idx.containsKey(cl.lightId) ? idx.get(cl.lightId) + 1 : 1;
+                    idx.put(cl.lightId, k);
+                    cl.name = cl.name + " (" + k + "/" + total + ")";
+                }
+            }
+        } catch (JSONException e) {
+            throw new IOException("Unexpected answer from bridge", e);
+        }
+        return out;
+    }
+
+    /** Sets a Hue light to a color (rgb 0..1) through the normal API, so it stays after streaming. */
+    public static void setLightColor(String ip, String appKey, String lightId, float r, float g, float b) throws IOException {
+        float max = Math.max(r, Math.max(g, b));
+        String body;
+        if (max < 0.01f) {
+            body = "{\"on\":{\"on\":false}}";
+        } else {
+            float[] lin = {lin(r / max), lin(g / max), lin(b / max)};
+            double X = lin[0] * 0.664511 + lin[1] * 0.154324 + lin[2] * 0.162028;
+            double Y = lin[0] * 0.283881 + lin[1] * 0.668433 + lin[2] * 0.047685;
+            double Z = lin[0] * 0.000088 + lin[1] * 0.072310 + lin[2] * 0.986039;
+            double sum = X + Y + Z;
+            double x = sum > 0 ? X / sum : 0.3127, y = sum > 0 ? Y / sum : 0.3290;
+            double bri = Math.max(1.0, Math.min(100.0, max * 100.0));
+            body = String.format(java.util.Locale.US,
+                    "{\"on\":{\"on\":true},\"dimming\":{\"brightness\":%.1f},\"color\":{\"xy\":{\"x\":%.4f,\"y\":%.4f}}}", bri, x, y);
+        }
+        request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, body, true);
+    }
+
+    private static float lin(float c) {
+        return c > 0.04045f ? (float) Math.pow((c + 0.055f) / 1.055f, 2.4f) : c / 12.92f;
+    }
+
     public static void setStreaming(String ip, String appKey, String areaId, boolean start) throws IOException {
         try {
             JSONObject o = new JSONObject(request("PUT", "https://" + ip + "/clip/v2/resource/entertainment_configuration/" + areaId,

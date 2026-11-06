@@ -26,6 +26,8 @@ public final class Features {
     public float keyHue;
     /** How clearly tonal the music is right now, 0..1. */
     public float tonality;
+    /** Dominant pitch as a MIDI note number (e.g. 69 = A4), or 0 when no clear note. */
+    public float pitch;
     /** True when there is (practically) no audio. */
     public boolean silent = true;
     /** Raw input level for the UI meter, 0..1. */
@@ -45,6 +47,7 @@ public final class Features {
         f.keyHue = keyHue;
         f.tonality = tonality;
         f.silent = silent;
+        f.pitch = pitch;
         f.inputMeter = inputMeter;
         return f;
     }

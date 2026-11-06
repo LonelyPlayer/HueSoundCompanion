@@ -12,8 +12,34 @@ import java.util.Random;
 public final class StripEffect {
     public static final int LIGHTS = 0, EQUALIZER = 1, SPECTRUM = 2, SCROLL = 3, ENERGY = 4,
             FIREWORKS = 5, RAIN = 6, FIRE = 7;
-    public static final String[] NAMES = {"Like the lights", "Equalizer", "Spectrum", "Scroll", "Energy",
-            "Fireworks", "Rain", "Fire"};
+    /** This app's own effects (ids 0..7); LedFx ports follow from {@link #LEDFX_BASE}. */
+    private static final String[] OWN = {"Like the lights", "Equalizer Peaks", "Spectrum Glow", "Flow", "Energy Bars",
+            "Fireworks", "Drops", "Campfire"};
+    public static final int LEDFX_BASE = 8;
+    /** All effect names by id. */
+    public static final String[] NAMES;
+    /** Category of every effect, for grouping in the picker. */
+    public static final String[] CATEGORIES;
+
+    static {
+        int n = OWN.length + LedFx.EFFECTS.size();
+        NAMES = new String[n];
+        CATEGORIES = new String[n];
+        for (int i = 0; i < OWN.length; i++) {
+            NAMES[i] = OWN[i];
+            CATEGORIES[i] = "HueSoundCompanion";
+        }
+        for (int i = 0; i < LedFx.EFFECTS.size(); i++) {
+            NAMES[LEDFX_BASE + i] = LedFx.EFFECTS.get(i).name;
+            CATEGORIES[LEDFX_BASE + i] = "LedFx · " + LedFx.EFFECTS.get(i).category;
+        }
+    }
+
+    /** Variant names for an effect (LedFx's main option), or null. */
+    public static String[] variants(int effect) {
+        int k = effect - LEDFX_BASE;
+        return k >= 0 && k < LedFx.EFFECTS.size() ? LedFx.EFFECTS.get(k).variants : null;
+    }
 
     public static final int STROBE_OFF = 0, STROBE_KICK = 1, STROBE_SNARE = 2, STROBE_BAR = 3, STROBE_BIG = 4;
     public static final String[] STROBE_TRIGGERS = {"Off", "Kick", "Snare / hi-hat", "Every 4th beat", "Big hits"};
@@ -22,6 +48,10 @@ public final class StripEffect {
 
     // settings (may be changed live)
     public volatile int effect = LIGHTS;
+    /** Variant of LedFx effects (e.g. Bar: wipe/bounce/in-out). */
+    public volatile int variant = 0;
+    /** Extra blur, 0 (none) .. 1 (strong). */
+    public volatile float blur = 0f;
     /** How fast things move, 0..1. */
     public volatile float speed = 0.5f;
     public volatile int strobeTrigger = STROBE_OFF;
@@ -59,6 +89,11 @@ public final class StripEffect {
     private float flash;
     private final float[] mask;
     private final float[] tmp = new float[3];
+
+    private LedFx.Ctx fx;
+    private LedFx.Effect fxEffect;
+    private int fxEffectId = -1;
+    private double clock;
 
     public StripEffect(int logicalPixels) {
         n = Math.max(1, logicalPixels);
@@ -105,6 +140,23 @@ public final class StripEffect {
         beatFlash *= (float) Math.exp(-dt / 0.12f);
         float inten = s.intensity;
         java.util.Arrays.fill(out, 0f);
+        clock += dt;
+        int id = effect;
+        if (id >= LEDFX_BASE && id - LEDFX_BASE < LedFx.EFFECTS.size()) {
+            LedFx.Info info = LedFx.EFFECTS.get(id - LEDFX_BASE);
+            if (fx == null) fx = new LedFx.Ctx(n);
+            if (fxEffectId != id) {
+                fxEffect = info.factory.create(n);
+                fxEffectId = id;
+            }
+            fx.rainbowAuto = "Fire".equals(info.name);
+            fx.update(f, clock, dt, s, speed, variant);
+            fxEffect.render(fx, out);
+            LedFx.blurRgb(out, n, info.blur);
+            float maxB = s.maxBrightness;
+            for (int i = 0; i < out.length; i++) out[i] = Math.max(0f, Math.min(1f, out[i])) * maxB;
+            return out;
+        }
         switch (effect) {
             case EQUALIZER: equalizer(f, dt, s, inten); break;
             case SPECTRUM: spectrum(f, s, inten); break;
