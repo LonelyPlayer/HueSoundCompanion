@@ -309,9 +309,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
         box.addView(ambAnimBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
 
         box.addView(section("Colors"));
-        box.addView(Ui.chipRow(this, paletteNames(), () -> a.palette, v -> {
+        box.addView(Ui.chipRow(this, paletteNames(), paletteSwatches(0), () -> a.palette, v -> {
             a.palette = v;
             prefs.saveAmbient();
+            rebuildStrips();
         }));
         ambColorBtn = pickerButton("Main color");
         setDot(ambColorBtn, a.color);
@@ -515,6 +516,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     }
 
     private void rebuildStrips() {
+        if (stripsBox == null) return;
         stripsBox.removeAllViews();
         stripList = prefs.strips();
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
@@ -618,7 +620,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             String[] pal = new String[Palettes.count() + 1];
             pal[0] = "Same as lights";
             for (int k = 0; k < Palettes.count(); k++) pal[k + 1] = Palettes.name(k);
-            body.addView(Ui.chipRow(this, pal, () -> st.palette + 1, v -> {
+            android.graphics.drawable.Drawable[] palIcons = paletteSwatches(1);
+            palIcons[0] = swatch(amb ? prefs.ambient.palette : prefs.light.palette);
+            body.addView(Ui.chipRow(this, pal, palIcons, () -> st.palette + 1, v -> {
                 st.palette = v - 1;
                 saveStrips();
             }));
@@ -639,7 +643,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
             }));
             strobeBox.addView(Ui.label(this, "Strobe color"));
-            strobeBox.addView(Ui.chipRow(this, STROBE_COLOR_NAMES, () -> strobeColorIndex(st.strobeColor), v -> {
+            android.graphics.drawable.Drawable[] strobeIcons = new android.graphics.drawable.Drawable[STROBE_COLORS.length];
+            for (int k = 0; k < STROBE_COLORS.length; k++) strobeIcons[k] = Pickers.dot(this, STROBE_COLORS[k], 14);
+            strobeBox.addView(Ui.chipRow(this, STROBE_COLOR_NAMES, strobeIcons, () -> strobeColorIndex(st.strobeColor), v -> {
                 st.strobeColor = STROBE_COLORS[v];
                 saveStrips();
             }));
@@ -714,6 +720,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 prefs.light.palette = p;
                 prefs.light.screenColors = false;
                 prefs.saveLight();
+                rebuildStrips();
                 refresh();
             });
             if (Palettes.isCustom(i)) {
@@ -730,6 +737,13 @@ public class MainActivity extends Activity implements SyncState.Listener {
         add.setTextColor(Ui.ACCENT);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, PaletteEditorActivity.class), REQ_EDIT_PALETTE));
         palettesRow.addView(add, Ui.lp(Ui.WRAP, Ui.WRAP));
+    }
+
+    /** Swatches for every palette, shifted by {@code offset} empty slots in front. */
+    private android.graphics.drawable.Drawable[] paletteSwatches(int offset) {
+        android.graphics.drawable.Drawable[] d = new android.graphics.drawable.Drawable[Palettes.count() + offset];
+        for (int k = 0; k < Palettes.count(); k++) d[k + offset] = swatch(k);
+        return d;
     }
 
     private GradientDrawable swatch(int palette) {
@@ -970,6 +984,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 }
             }
             rebuildPalettes();
+            rebuildStrips();
             refresh();
         }
     }

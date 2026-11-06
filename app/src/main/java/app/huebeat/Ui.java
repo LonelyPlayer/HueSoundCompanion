@@ -140,6 +140,11 @@ final class Ui {
 
     /** A horizontally scrolling row of single-choice chips. */
     static android.view.View chipRow(Context c, String[] names, IntGet get, IntSet set) {
+        return chipRow(c, names, null, get, set);
+    }
+
+    /** Chips with a small color preview in front of each label (null entries = no preview). */
+    static android.view.View chipRow(Context c, String[] names, android.graphics.drawable.Drawable[] icons, IntGet get, IntSet set) {
         android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(c);
         hs.setHorizontalScrollBarEnabled(false);
         LinearLayout row = row(c);
@@ -147,6 +152,10 @@ final class Ui {
         for (int i = 0; i < names.length; i++) {
             final int v = i;
             TextView chip = chip(c, names[i]);
+            if (icons != null && i < icons.length && icons[i] != null) {
+                chip.setCompoundDrawablePadding(dp(c, 8));
+                chip.setCompoundDrawablesRelative(icons[i], null, null, null);
+            }
             chip.setOnClickListener(x -> {
                 set.set(v);
                 for (int k = 0; k < chips.size(); k++) setChipSelected(chips.get(k), k == get.get());
