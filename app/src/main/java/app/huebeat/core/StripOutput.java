@@ -43,7 +43,8 @@ public final class StripOutput {
     private final StripProtocol proto = new StripProtocol();
     private final float[] logical;
     private final byte[] pixels;
-    private final float[] gammaLut = new float[1025];
+    /** Rounding error carried to the next frame per LED channel (temporal dithering). */
+    private final float[] dither;
 
     public StripOutput(String name, InetAddress address, int protocol, int leds, int universe,
                        boolean mirror, boolean reverse, float brightness) {
@@ -64,8 +65,10 @@ public final class StripOutput {
         effect = new StripEffect(span);
         logical = new float[3 * span];
         pixels = new byte[3 * this.leds];
-        // WS2812-type LEDs are linear; the frames are perceptual → extra gamma
-        for (int i = 0; i <= 1024; i++) gammaLut[i] = (float) Math.pow(i / 1024.0, 1.6);
+        dither = new float[3 * this.leds];
+        // different start offsets per LED, so neighbours step at different moments (no strip-wide pulsing)
+        java.util.Random rnd = new java.util.Random(1);
+        for (int i = 0; i < dither.length; i++) dither[i] = rnd.nextFloat() - 0.5f;
     }
 
     /** Screen / camera colors for this strip's segments (rgb per segment), or null. */
@@ -90,8 +93,7 @@ public final class StripOutput {
             float[] px = effect.render(f, dt, s);
             System.arraycopy(px, 0, logical, 0, logical.length);
         }
-        float b = effect.blur;
-        if (b > 0.005f) LedFx.blurRgb(logical, span, 10f * b * b + 0.5f * b);
+        applyBlur();
         effect.strobeOnly(logical, f, dt);
         return logical;
     }
@@ -106,14 +108,13 @@ public final class StripOutput {
         ambientOwn.speed = effect.speed;
         float[] px = ambient.render(dt, ambientOwn, null);
         System.arraycopy(px, 0, logical, 0, logical.length);
-        float b = effect.blur;
-        if (b > 0.005f) LedFx.blurRgb(logical, span, 10f * b * b + 0.5f * b);
+        applyBlur();
         return logical;
     }
 
     /** The last frame mapped onto the physical LEDs (0xRRGGBB each), e.g. to keep it after stopping. */
     public int[] physicalColors() {
-        byte[] px = buildPixels(logical);
+        byte[] px = buildPixels(logical, false);
         int[] c = new int[leds];
         for (int i = 0; i < leds; i++) c[i] = ((px[3 * i] & 0xFF) << 16) | ((px[3 * i + 1] & 0xFF) << 8) | (px[3 * i + 2] & 0xFF);
         return c;
@@ -140,6 +141,19 @@ public final class StripOutput {
         return m;
     }
 
+    /**
+     * The blur slider: 0 = off, 1 = colors flow into each other over about a third of the strip.
+     * Mixed in linear light (like overlapping real light), so blends stay bright instead of going muddy.
+     */
+    private void applyBlur() {
+        float b = effect.blur;
+        if (b <= 0.005f || span < 3) return;
+        float sigma = Math.min(span / 2f, b * b * 0.12f * span + 2.5f * b);
+        for (int i = 0; i < 3 * span; i++) logical[i] = (float) Math.pow(Math.max(0f, logical[i]), 2.2);
+        LedFx.blurRgb(logical, span, sigma);
+        for (int i = 0; i < 3 * span; i++) logical[i] = (float) Math.pow(Math.max(0f, logical[i]), 1 / 2.2);
+    }
+
     private static void upsample(float[] src, int ns, float[] dst, int nd) {
         for (int p = 0; p < nd; p++) {
             float s = nd == 1 ? 0f : (float) p / (nd - 1) * (ns - 1);
@@ -150,7 +164,7 @@ public final class StripOutput {
     }
 
     /** Maps the logical frame onto the physical LEDs (mirror, reverse), brightness and gamma. */
-    byte[] buildPixels(float[] lg) {
+    byte[] buildPixels(float[] lg, boolean dithered) {
         float half = (leds - 1) / 2f;
         for (int p = 0; p < leds; p++) {
             float t;
@@ -163,7 +177,20 @@ public final class StripOutput {
             for (int k = 0; k < 3; k++) {
                 float v = lg[3 * a + k] * (1 - f) + lg[3 * b + k] * f;
                 v = Math.max(0f, Math.min(1f, v)) * Math.max(0f, Math.min(1f, brightness));
-                pixels[3 * p + k] = (byte) Math.round(gammaLut[Math.round(v * 1024)] * 255f);
+                // WS2812-type LEDs are linear; the frames are perceptual → extra gamma
+                float want = (float) Math.pow(v, 1.6) * 255f;
+                int o;
+                if (dithered && want > 0.02f) {
+                    // 8 bits are too coarse for slow fades in the dark: alternate between the two
+                    // neighbouring levels so the average over a few frames hits the exact value
+                    float x = want + dither[3 * p + k];
+                    o = Math.max(0, Math.min(255, Math.round(x)));
+                    dither[3 * p + k] = Math.max(-0.5f, Math.min(0.5f, x - o));
+                } else {
+                    o = Math.round(want);
+                    if (dithered) dither[3 * p + k] = 0f;
+                }
+                pixels[3 * p + k] = (byte) o;
             }
         }
         return pixels;
@@ -171,7 +198,7 @@ public final class StripOutput {
 
     /** Sends the logical frame. */
     public void send(DatagramSocket socket, float[] lg) throws IOException {
-        byte[] px = buildPixels(lg);
+        byte[] px = buildPixels(lg, true);
         List<byte[]> packets = proto.packets(protocol, px, leds, universe);
         for (byte[] p : packets) socket.send(new DatagramPacket(p, p.length, address, port));
     }
