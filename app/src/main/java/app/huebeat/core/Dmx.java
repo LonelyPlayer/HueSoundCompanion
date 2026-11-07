@@ -233,6 +233,8 @@ public final class Dmx {
         private final byte[] cid = new byte[16];
         private int lastBeat = Integer.MIN_VALUE;
         private float[] lastRgb;
+        /** Build-up overlay (null = none); applied to the colors before they become channels. */
+        public Buildup overlay;
 
         public Output(List<Fixture> fixtures) {
             this.fixtures = fixtures;
@@ -261,6 +263,10 @@ public final class Dmx {
             own.copyFrom(s);
             own.maxBrightness = 1f;
             float[] rgb = renderer.render(f, t, dt, own);
+            if (overlay != null) {
+                rgb = rgb.clone();
+                overlay.apply(rgb, rgb.length / 3);
+            }
             boolean beat = f != null && f.beatCount != lastBeat && lastBeat != Integer.MIN_VALUE;
             if (f != null) lastBeat = f.beatCount;
             float period = f != null && f.bpm > 0 ? 60f / f.bpm : 0.5f;

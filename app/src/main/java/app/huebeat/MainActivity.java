@@ -225,6 +225,20 @@ public class MainActivity extends Activity implements SyncState.Listener {
             prefs.light.colorMove = v / 100f;
             prefs.saveLight();
         }));
+        LinearLayout buildRow = Ui.row(this);
+        LinearLayout buildText = Ui.column(this);
+        buildText.addView(Ui.text(this, "Build-ups & drops", 15, Ui.TEXT, false));
+        buildText.addView(Ui.text(this, "Risers make the lights brighter, whiter and flash faster; black before the drop, white when it hits.",
+                13, Ui.SUB, false));
+        buildRow.addView(buildText, Ui.lp(0, Ui.WRAP, 1));
+        Switch buildSw = new Switch(this);
+        buildSw.setChecked(prefs.light.buildups);
+        buildSw.setOnCheckedChangeListener((bv, on) -> {
+            prefs.light.buildups = on;
+            prefs.saveLight();
+        });
+        buildRow.addView(buildSw);
+        look.addView(buildRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
         look.addView(section("Max brightness"));
         look.addView(slider(Math.round(prefs.light.maxBrightness * 100), 100, v -> {
             prefs.light.maxBrightness = Math.max(0.05f, v / 100f);

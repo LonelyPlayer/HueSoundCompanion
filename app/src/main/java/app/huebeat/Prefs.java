@@ -37,6 +37,7 @@ public final class Prefs {
         light.colorMove = sp.getFloat("colorMove", 0.5f);
         light.maxBrightness = sp.getFloat("maxBrightness", 1f);
         light.strobe = sp.getBoolean("strobe", false);
+        light.buildups = sp.getBoolean("buildups", true);
         light.screenColors = sp.getBoolean("screenColors", false);
         ambient.animation = sp.getInt("amb_anim", app.huebeat.core.Ambient.PALETTE);
         ambient.palette = sp.getInt("amb_palette", 1);
@@ -141,6 +142,7 @@ public final class Prefs {
                 .putFloat("colorMove", light.colorMove)
                 .putFloat("maxBrightness", light.maxBrightness)
                 .putBoolean("strobe", light.strobe)
+                .putBoolean("buildups", light.buildups)
                 .putBoolean("screenColors", light.screenColors)
                 .apply();
     }

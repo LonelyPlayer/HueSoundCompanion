@@ -195,6 +195,7 @@ public class SyncService extends Service {
         DatagramSocket stripSock = null;
         DmxRun dmxRun = new DmxRun();
         app.huebeat.core.Shuffle shuffle = new app.huebeat.core.Shuffle();
+        app.huebeat.core.Buildup buildup = new app.huebeat.core.Buildup();
         boolean shuffled = false;
         boolean hue = prefs.isConfigured();
         try {
@@ -421,11 +422,25 @@ public class SyncService extends Service {
                     dmxRun.seen = Integer.MIN_VALUE;
                     dmxRun.update(prefs);
                 }
-                if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, use);
+                boolean showBuild = ls.buildups && !calibrating;
+                if (showBuild) buildup.update(f, dt);
+                shuffle.building = showBuild ? buildup.level() : 0f;
+                dmxRun.out.overlay = showBuild ? buildup : null;
+                if (!calibrating && renderer != null) {
+                    rgb = renderer.render(f, tSec, dt, use);
+                    if (showBuild) {
+                        rgb = rgb.clone(); // the renderer keeps its own frame for smoothing
+                        buildup.apply(rgb, rgb.length / 3);
+                    }
+                }
                 if (!calibrating) dmxRun.out.render(f, tSec, dt, use);
                 float[][] stripRgb = new float[strips.size()][];
                 for (int k = 0; k < strips.size(); k++) {
                     stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, use);
+                    if (showBuild) {
+                        stripRgb[k] = stripRgb[k].clone();
+                        buildup.applyStrip(stripRgb[k], stripRgb[k].length / 3);
+                    }
                 }
                 // remember what the lights showed (average), for removing their glow from the camera image
                 float sr = 0f, sg = 0f, sb = 0f;

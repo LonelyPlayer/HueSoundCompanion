@@ -58,6 +58,9 @@ public final class Shuffle {
     private static final String[] FX_HIGH = {"Power", "Blade Power+", "Bar", "Scan", "Scan and Flare", "Scan Multi", "Glitch",
             "Strobe", "BPM Strobe", "Fireworks", "Blocks", "Energy", "Metro"};
 
+    /** Current build-up level (phrase changes wait while the music builds). */
+    public volatile float building = 0f;
+
     /** Ask for a new look right away (the "Shuffle now" button). */
     public void reshuffle() {
         forced = true;
@@ -185,7 +188,7 @@ public final class Shuffle {
             }
         }
         // next phrase, but not while the music is just swelling up (that's usually a drop coming)
-        boolean rising = dbFast > dbSlow + 3f;
+        boolean rising = dbFast > dbSlow + 3f || building > 0.3f;
         if (why == null && pending == null && warmedUp && !rising && (beatsSince >= 32 && since > 12 || since > 40)) why = "next phrase";
         if (why != null) {
             float quick = clamp01(1f - (dbPeak - dbQuick) / 14f);
