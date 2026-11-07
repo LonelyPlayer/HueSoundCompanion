@@ -32,6 +32,11 @@ public final class Features {
     public float melody;
     /** How clearly that melody note stands out, 0..1. */
     public float melodyConf;
+    /** Current chord: root pitch class (0 = C … 11 = B) or -1 when unclear, minor or major. */
+    public int chordRoot = -1;
+    public boolean chordMinor;
+    /** Counts chord changes (a new value = the chord just changed). */
+    public int chordCount;
     /** True when there is (practically) no audio. */
     public boolean silent = true;
     /** Raw input level for the UI meter, 0..1. */
@@ -54,6 +59,9 @@ public final class Features {
         f.pitch = pitch;
         f.melody = melody;
         f.melodyConf = melodyConf;
+        f.chordRoot = chordRoot;
+        f.chordMinor = chordMinor;
+        f.chordCount = chordCount;
         f.inputMeter = inputMeter;
         return f;
     }

@@ -302,6 +302,7 @@ public final class Analyzer {
         }
 
         // harmony color
+        chordNow = t;
         if (!silent) {
             if (chromaMode == 1) updateChroma();
             else if (chromaMode == 2) chromaFromSpectrum(nBins, binHz, rate(0.03f, k));
@@ -309,6 +310,9 @@ public final class Analyzer {
         float hue = (float) (Math.atan2(keyY, keyX) / (2 * Math.PI));
         if (hue < 0) hue += 1f;
         cur.keyHue = hue;
+        cur.chordRoot = chordRoot;
+        cur.chordMinor = chordMinor;
+        cur.chordCount = chordCount;
         if (chromaMode != 2) {
             // PCM input: the melody detector runs with the fine spectrum (every few frames); hold it between
             cur.melody = silent ? 0f : melody;
@@ -343,6 +347,68 @@ public final class Analyzer {
 
     private float melody = 0f, melodyConf = 0f;
     private float[] melMag;
+
+    // ---- chords: the chroma matched against the 24 major and minor triads
+    private final float[] chordChroma = new float[12];
+    private double chordT = -1, chordNow;
+    private int chordRoot = -1, chordCount = 0, candRoot = -1;
+    private boolean chordMinor, candMinor;
+    private double candSince;
+
+    private void updateChord() {
+        double dt = chordT < 0 ? 0.05 : Math.max(0.0, Math.min(0.5, chordNow - chordT));
+        chordT = chordNow;
+        float max = 0f;
+        for (float c : chroma) max = Math.max(max, c);
+        if (max <= 1e-9f) return;
+        // about half a second of memory: passing notes don't count, a new chord takes over quickly
+        float a = 1f - (float) Math.exp(-dt / 0.35);
+        for (int i = 0; i < 12; i++) chordChroma[i] += (chroma[i] / max - chordChroma[i]) * a;
+
+        float mean = 0f;
+        for (float c : chordChroma) mean += c / 12f;
+        float best = -1e9f, second = -1e9f;
+        int bestRoot = -1;
+        boolean bestMinor = false;
+        for (int r = 0; r < 12; r++) {
+            for (int q = 0; q < 2; q++) {
+                int third = q == 0 ? 4 : 3;
+                float sc = chordChroma[r] * 1.1f + chordChroma[(r + third) % 12] + chordChroma[(r + 7) % 12] * 0.9f;
+                // notes outside the triad count against it
+                float rest = 0f;
+                for (int i = 0; i < 12; i++) {
+                    if (i == r || i == (r + third) % 12 || i == (r + 7) % 12) continue;
+                    rest += chordChroma[i];
+                }
+                sc -= rest * 0.25f;
+                if (sc > best) {
+                    second = best;
+                    best = sc;
+                    bestRoot = r;
+                    bestMinor = q == 1;
+                } else if (sc > second) {
+                    second = sc;
+                }
+            }
+        }
+        boolean clear = best > 3f * mean + 0.3f && best - second > 0.04f;
+        if (!clear) return; // keep the current chord
+        if (bestRoot == chordRoot && bestMinor == chordMinor) {
+            candRoot = -1;
+            return;
+        }
+        // a different chord must win for a moment before it's taken (no flicker between two)
+        if (bestRoot != candRoot || bestMinor != candMinor) {
+            candRoot = bestRoot;
+            candMinor = bestMinor;
+            candSince = chordNow;
+        } else if (chordNow - candSince >= 0.15) {
+            chordRoot = bestRoot;
+            chordMinor = bestMinor;
+            chordCount++;
+            candRoot = -1;
+        }
+    }
 
     /**
      * Melody note from the fine spectrum: every candidate fundamental (150 Hz..1.1 kHz) is scored
@@ -408,6 +474,7 @@ public final class Analyzer {
     }
 
     private void applyChroma(float smoothing) {
+        updateChord();
         // Emphasise the strongest pitch classes, then place them on the circle of fifths so that
         // related keys get neighbouring colors.
         float max = 0f;

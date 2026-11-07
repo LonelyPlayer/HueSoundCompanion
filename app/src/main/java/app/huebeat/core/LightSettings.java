@@ -3,10 +3,10 @@ package app.huebeat.core;
 /** Live-adjustable settings shared between the UI and the streaming engine. */
 public final class LightSettings {
     public static final int STYLE_BEAT = 0, STYLE_SPECTRUM = 1, STYLE_AMBIENT = 2, STYLE_PARTY = 3, STYLE_SCREEN = 4,
-            STYLE_MELODY = 5;
-    public static final String[] STYLE_NAMES = {"Beat", "Spectrum", "Ambient", "Party", "Screen", "Melody"};
+            STYLE_MELODY = 5, STYLE_CHORDS = 6;
+    public static final String[] STYLE_NAMES = {"Beat", "Spectrum", "Ambient", "Party", "Screen", "Melody", "Chords"};
     /** Order of the style chips on screen (saved values stay the same). */
-    public static final int[] STYLE_ORDER = {STYLE_BEAT, STYLE_MELODY, STYLE_SPECTRUM, STYLE_AMBIENT, STYLE_PARTY, STYLE_SCREEN};
+    public static final int[] STYLE_ORDER = {STYLE_BEAT, STYLE_MELODY, STYLE_CHORDS, STYLE_SPECTRUM, STYLE_AMBIENT, STYLE_PARTY, STYLE_SCREEN};
 
     public volatile int style = STYLE_BEAT;
     /** Index into the palette list ({@link Palettes#name(int)}); 0 = Auto (colors from the music's harmony). */

@@ -148,6 +148,9 @@ public final class Renderer {
             case LightSettings.STYLE_SPECTRUM: spectrum(f, t, dt, s, beat, inten); break;
             case LightSettings.STYLE_AMBIENT: ambient(f, t, dt, s, beat, inten); break;
             case LightSettings.STYLE_PARTY: party(f, dt, s, beat, snare, inten, period); break;
+            case LightSettings.STYLE_CHORDS:
+                chords(f, dt, s, beat, snare, inten, period);
+                break;
             case LightSettings.STYLE_MELODY:
                 followMelody(f, dt, inten);
                 beatStyle(f, dt, s, beat, snare, inten, period, true);
@@ -173,6 +176,57 @@ public final class Renderer {
         float k = 1f - (float) Math.exp(-dt / tau);
         melX += ((float) Math.cos(a) - melX) * k;
         melY += ((float) Math.sin(a) - melY) * k;
+    }
+
+    // ---- Chords: lamps split between the chord's root, third and fifth
+    private float[] chX, chY;
+    private int lastChord = -1;
+    private float chordSat = 0.95f;
+
+    private void chords(Features f, float dt, LightSettings s, boolean beat, boolean snare, float inten, float period) {
+        if (chX == null) {
+            chX = new float[n];
+            chY = new float[n];
+            java.util.Arrays.fill(chX, 1f);
+        }
+        if (f.chordCount != lastChord) {
+            boolean first = lastChord == -1;
+            lastChord = f.chordCount;
+            // a chord change swells all lamps a little
+            if (!first && f.chordRoot >= 0) for (int i = 0; i < n; i++) env[i] = Math.max(env[i], 0.55f + 0.3f * inten);
+        }
+        if (beat) {
+            beatIndex++;
+            float strength = 0.6f + 0.4f * f.beatStrength;
+            for (int i = 0; i < n; i++) env[i] = Math.max(env[i], strength * (0.8f + 0.2f * (i % 2)));
+        }
+        if (snare && inten > 0.2f && n > 0) {
+            int i = random.nextInt(n);
+            sparkle[i] = Math.max(sparkle[i], 0.25f + 0.5f * inten);
+        }
+        float tau = lerp(Math.max(0.25f, period * 0.9f), 0.06f, (float) Math.pow(inten, 0.8));
+        float floor = lerp(0.45f, 0.04f, inten) * (0.4f + 0.6f * f.level);
+        float glide = 1f - (float) Math.exp(-dt / lerp(0.6f, 0.12f, inten));
+        int root = f.chordRoot;
+        float satTarget = root >= 0 && f.chordMinor ? 0.78f : 0.95f;
+        chordSat += (satTarget - chordSat) * glide;
+        for (int i = 0; i < n; i++) {
+            if (root >= 0) {
+                // spread root / third / fifth over the room; Color movement = how far they spread
+                int tone = n == 1 ? 0 : Math.round(rank[i] * (n - 1)) % 3;
+                int interval = tone == 0 ? 0 : tone == 1 ? (f.chordMinor ? 3 : 4) : 7;
+                double a = 2 * Math.PI * (root + interval * s.colorMove) / 12.0;
+                chX[i] += ((float) Math.cos(a) - chX[i]) * glide;
+                chY[i] += ((float) Math.sin(a) - chY[i]) * glide;
+            }
+            env[i] = decay(env[i], dt, tau);
+            sparkle[i] = decay(sparkle[i], dt, lerp(0.15f, 0.05f, inten));
+            float pos = (float) (Math.atan2(chY[i], chX[i]) / (2 * Math.PI));
+            if (pos < 0) pos += 1f;
+            color(i, s, pos, pos * 0.55f, chordSat); // Auto palette: hue = pos (see melody)
+            setTarget(i, tmp, floor + (1f - floor) * env[i], sparkle[i] * 0.75f);
+        }
+        smooth(dt, lerp(0.06f, 0f, inten), lerp(0.12f, 0.02f, inten), s);
     }
 
     private float melodyPos() {
