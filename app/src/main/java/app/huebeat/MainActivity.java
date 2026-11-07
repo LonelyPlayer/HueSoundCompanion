@@ -923,7 +923,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
         switch (SyncState.status) {
             case RUNNING:
                 status.setTextColor(Ui.TEXT);
-                status.setText(amb ? "Lights on" : SyncState.bpm > 0 ? "Syncing · " + Math.round(SyncState.bpm) + " BPM" : "Syncing");
+                String st = amb ? "Lights on" : SyncState.bpm > 0 ? "Syncing · " + Math.round(SyncState.bpm) + " BPM" : "Syncing";
+                if (!amb && prefs.light.style == LightSettings.STYLE_CHORDS) {
+                    if (!SyncState.chord.isEmpty()) st += " · " + SyncState.chord;
+                    else if (prefs.mode() != Prefs.MODE_MIC && SyncState.visualizer) st += " · no chords via visualizer";
+                }
+                status.setText(st);
                 hint.setText(SyncState.hint);
                 break;
             case STARTING:

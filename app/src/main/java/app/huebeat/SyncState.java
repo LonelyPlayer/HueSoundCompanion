@@ -23,6 +23,10 @@ public final class SyncState {
     // live values for the button animation (written ~50x/s by the engine)
     public static volatile float r, g, b, meter, bpm;
     public static volatile boolean bluetooth;
+    /** The chord the music is on right now ("Am"), "" when unknown or not detected in this mode. */
+    public static volatile String chord = "";
+    /** The visualizer fallback is feeding the analysis (e.g. Spotify blocks capture). */
+    public static volatile boolean visualizer;
 
     private SyncState() {
     }

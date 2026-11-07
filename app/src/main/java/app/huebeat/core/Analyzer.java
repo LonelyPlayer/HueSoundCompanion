@@ -330,6 +330,8 @@ public final class Analyzer {
 
     /** Coarse chroma for low-resolution spectra: only bins high enough to separate semitones. */
     private void chromaFromSpectrum(int nBins, float binHz, float smoothing) {
+        // no chords here: the visualizer's coarse 8-bit spectrum can't tell neighbouring notes
+        // apart (tested: barely better than guessing), so Chords follows the overall harmony instead
         Arrays.fill(chroma, 0f);
         // a semitone is ~6% of the frequency, so bins resolve it from about 17.5 bins upward
         int lo = Math.max(1, Math.round(Math.max(400f, binHz * 17.5f) / binHz));
@@ -355,43 +357,97 @@ public final class Analyzer {
     private boolean chordMinor, candMinor;
     private double candSince;
 
+    private final float[] chordRaw = new float[12], bassRaw = new float[12], bassChroma = new float[12];
+    private float[] chordPrefix;
+    private boolean chordFresh;
+
+    /**
+     * Chord chroma: only tonal peaks count. A bin counts when it is a local maximum that stands
+     * clearly above the average of the surrounding third of an octave (drums and noise are broad,
+     * notes are narrow) and, with a fine spectrum, sits close to a real semitone.
+     */
+    private void chordChromaFrom(float[] m, int nb, float binHz, float loHz, float hiHz, boolean fine) {
+        if (chordPrefix == null || chordPrefix.length < nb + 1) chordPrefix = new float[nb + 1];
+        chordPrefix[0] = 0f;
+        for (int k = 0; k < nb; k++) chordPrefix[k + 1] = chordPrefix[k] + m[k];
+        Arrays.fill(chordRaw, 0f);
+        Arrays.fill(bassRaw, 0f);
+        int lo = Math.max(2, Math.round(loHz / binHz)), hi = Math.min(nb - 2, Math.round(hiHz / binHz));
+        for (int k = lo; k <= hi; k++) {
+            float v = m[k];
+            if (v <= 0f || v < m[k - 1] || v < m[k + 1]) continue;
+            int w = Math.max(3, Math.round(k * 0.12f));
+            int a = Math.max(0, k - w), b = Math.min(nb, k + w + 1);
+            float local = (chordPrefix[b] - chordPrefix[a]) / (b - a);
+            if (local <= 1e-12f) continue;
+            float ratio = v / local;
+            if (ratio < 1.6f) continue;
+            float den = m[k - 1] - 2 * v + m[k + 1];
+            float off = Math.abs(den) > 1e-12f ? Math.max(-0.5f, Math.min(0.5f, 0.5f * (m[k - 1] - m[k + 1]) / den)) : 0f;
+            float f = (k + off) * binHz;
+            float midi = 69f + 12f * (float) (Math.log(f / 440.0) / Math.log(2));
+            int nearest = Math.round(midi);
+            if (fine && Math.abs(midi - nearest) > 0.3f) continue; // between semitones: not a note
+            int pc = ((nearest % 12) + 12) % 12;
+            // lower notes carry the harmony; overtones high up are weighted down
+            float wgt = (float) Math.log(ratio) * (f < 600f ? 1f : 600f / f + 0.3f);
+            chordRaw[pc] += wgt;
+            if (f < 220f) bassRaw[pc] += (float) Math.log(ratio); // the bass usually plays the root
+        }
+        chordFresh = true;
+    }
+
     private void updateChord() {
+        if (!chordFresh) return;
+        chordFresh = false;
         double dt = chordT < 0 ? 0.05 : Math.max(0.0, Math.min(0.5, chordNow - chordT));
         chordT = chordNow;
         float max = 0f;
-        for (float c : chroma) max = Math.max(max, c);
+        for (float c : chordRaw) max = Math.max(max, c);
         if (max <= 1e-9f) return;
         // about half a second of memory: passing notes don't count, a new chord takes over quickly
-        float a = 1f - (float) Math.exp(-dt / 0.35);
-        for (int i = 0; i < 12; i++) chordChroma[i] += (chroma[i] / max - chordChroma[i]) * a;
+        float al = 1f - (float) Math.exp(-dt / 0.4);
+        for (int i = 0; i < 12; i++) chordChroma[i] += (chordRaw[i] / max - chordChroma[i]) * al;
+        float bmax = 0f;
+        for (float c : bassRaw) bmax = Math.max(bmax, c);
+        for (int i = 0; i < 12; i++) bassChroma[i] += ((bmax > 1e-9f ? bassRaw[i] / bmax : 0f) - bassChroma[i]) * al;
+        float bmean = 0f;
+        for (float c : bassChroma) bmean += c / 12f;
 
+        // correlation with each triad template (template: 3 chord tones = 1, others = 0)
         float mean = 0f;
         for (float c : chordChroma) mean += c / 12f;
-        float best = -1e9f, second = -1e9f;
+        float var = 0f;
+        for (float c : chordChroma) var += (c - mean) * (c - mean);
+        if (var <= 1e-9f) return;
+        float sd = (float) Math.sqrt(var);
+        // template z-scores: chord tones +sqrt(3)/... computed generically
+        final float tOn = 0.75f, tOff = -0.25f, tNorm = (float) Math.sqrt(3 * tOn * tOn + 9 * tOff * tOff);
+        float best = -2f, second = -2f;
         int bestRoot = -1;
         boolean bestMinor = false;
         for (int r = 0; r < 12; r++) {
             for (int q = 0; q < 2; q++) {
-                int third = q == 0 ? 4 : 3;
-                float sc = chordChroma[r] * 1.1f + chordChroma[(r + third) % 12] + chordChroma[(r + 7) % 12] * 0.9f;
-                // notes outside the triad count against it
-                float rest = 0f;
+                int third = (r + (q == 0 ? 4 : 3)) % 12, fifth = (r + 7) % 12;
+                float dot = 0f;
                 for (int i = 0; i < 12; i++) {
-                    if (i == r || i == (r + third) % 12 || i == (r + 7) % 12) continue;
-                    rest += chordChroma[i];
+                    boolean on = i == r || i == third || i == fifth;
+                    dot += (chordChroma[i] - mean) * (on ? tOn : tOff);
                 }
-                sc -= rest * 0.25f;
-                if (sc > best) {
+                // the root slightly preferred (bass), so C and Am (sharing two notes) separate
+                float corr = dot / (sd * tNorm) + 0.08f * (chordChroma[r] - mean) / sd
+                        + 0.35f * (bassChroma[r] - bmean);
+                if (corr > best) {
                     second = best;
-                    best = sc;
+                    best = corr;
                     bestRoot = r;
                     bestMinor = q == 1;
-                } else if (sc > second) {
-                    second = sc;
+                } else if (corr > second) {
+                    second = corr;
                 }
             }
         }
-        boolean clear = best > 3f * mean + 0.3f && best - second > 0.04f;
+        boolean clear = best > 0.45f && best - second > 0.03f;
         if (!clear) return; // keep the current chord
         if (bestRoot == chordRoot && bestMinor == chordMinor) {
             candRoot = -1;
@@ -458,6 +514,7 @@ public final class Analyzer {
         Arrays.fill(chroma, 0f);
         float binHz = (float) sampleRate / NC;
         updateMelody(binHz);
+        chordChromaFrom(melMag, NC / 2, binHz, 80f, 2500f, true);
         int lo = Math.round(98f / binHz), hi = Math.min(NC / 2, Math.round(4000f / binHz));
         float total = 0f;
         for (int k = lo; k < hi; k++) {

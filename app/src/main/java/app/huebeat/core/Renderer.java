@@ -211,7 +211,12 @@ public final class Renderer {
         float satTarget = root >= 0 && f.chordMinor ? 0.78f : 0.95f;
         chordSat += (satTarget - chordSat) * glide;
         for (int i = 0; i < n; i++) {
-            if (root >= 0) {
+            if (root < 0) {
+                // no chord known (e.g. visualizer input): the overall harmony color, slightly spread
+                double a = 2 * Math.PI * (f.keyHue + (rank[i] - 0.5f) * 0.15f * s.colorMove);
+                chX[i] += ((float) Math.cos(a) - chX[i]) * glide;
+                chY[i] += ((float) Math.sin(a) - chY[i]) * glide;
+            } else {
                 // spread root / third / fifth over the room; Color movement = how far they spread
                 int tone = n == 1 ? 0 : Math.round(rank[i] * (n - 1)) % 3;
                 int interval = tone == 0 ? 0 : tone == 1 ? (f.chordMinor ? 3 : 4) : 7;

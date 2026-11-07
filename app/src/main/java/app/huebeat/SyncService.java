@@ -327,6 +327,7 @@ public class SyncService extends Service {
                 }
                 Features vz = viz != null ? viz.analyzer.latest() : null;
                 useViz = captureSilent && vz != null && !vz.silent;
+                SyncState.visualizer = useViz;
                 Analyzer active = useViz ? viz.analyzer : analyzer;
                 ls.delayMs = mode == Prefs.MODE_MIC ? 0
                         : (SyncState.bluetooth ? prefs.delayBluetooth() : prefs.delaySpeaker());
@@ -445,6 +446,8 @@ public class SyncService extends Service {
                 Features latest = active.latest();
                 SyncState.meter = latest != null ? latest.inputMeter : 0f;
                 SyncState.bpm = latest != null ? latest.bpm : 0f;
+                SyncState.chord = latest != null && latest.chordRoot >= 0
+                        ? CHORD_NAMES[latest.chordRoot] + (latest.chordMinor ? "m" : "") : "";
                 boolean screenWanted = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
                 if (camera) {
                     silentSince = now;
@@ -515,6 +518,8 @@ public class SyncService extends Service {
         }
     }
 
+    private static final String[] CHORD_NAMES = {"C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"};
+
     // ------------------------------------------------------------------ ambient mode
 
     /** Lights without music: palettes, single colors per lamp and calm animations. */
@@ -563,6 +568,8 @@ public class SyncService extends Service {
             Ambient.Settings as = prefs.ambient;
             SyncState.meter = 0f;
             SyncState.bpm = 0f;
+            SyncState.chord = "";
+            SyncState.visualizer = false;
             SyncState.set(SyncState.Status.RUNNING, "");
             SyncState.setHint("");
             notifyAmbient(prefs);
