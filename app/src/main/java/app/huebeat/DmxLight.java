@@ -18,7 +18,7 @@ final class DmxLight {
     float x = 0f;            // -1 left .. 1 right
     float brightness = 1f;
     boolean enabled = true;
-    float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.3f;
+    float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
     int strobeMode = 0;
 
     JSONObject toJson() throws JSONException {

@@ -226,7 +226,7 @@ public final class Shuffle {
         intensity = clamp01(0.22f + 0.72f * e + (rnd.nextFloat() - 0.5f) * 0.12f);
         colorMove = clamp01(0.25f + 0.6f * e + (rnd.nextFloat() - 0.5f) * 0.15f);
         palette = pickPalette(e);
-        dmxMove = 0.08f + 0.55f * e;
+        dmxMove = 0.2f + 0.7f * e;
         dmxStrobe = e > 0.75f ? 1 : 0;
         stripPick.clear();
         stripPickF.clear();

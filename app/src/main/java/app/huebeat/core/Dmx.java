@@ -88,7 +88,7 @@ public final class Dmx {
         public volatile int[] roles;
         public volatile float brightness = 1f;
         /** Moving heads: where they point (0..1 of the full range) and how far they roam. */
-        public volatile float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.3f;
+        public volatile float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
         /** 0 = no strobe, 1 = on strong beats. */
         public volatile int strobeMode = 0;
         /** Channel tester: when not null, these raw values are sent instead of the show. */
@@ -96,6 +96,8 @@ public final class Dmx {
 
         // state
         private float pan = 0.5f, tilt = 0.5f, panT = 0.5f, tiltT = 0.5f;
+        private float peak = 0.4f;
+        private boolean side;
         private int wheelSlot = 0;
         private float wheelHold = 0f;
         private float strobeLeft = 0f;
@@ -120,8 +122,11 @@ public final class Dmx {
         /** Music: a new target to point at on beats. */
         void onBeat(float beatStrength) {
             if (move <= 0.001f) return;
-            panT = clamp01(panCenter + (rnd.nextFloat() - 0.5f) * move);
-            tiltT = clamp01(tiltCenter + (rnd.nextFloat() - 0.5f) * move * 0.7f);
+            // swing to the other side of the aim point every beat, so the moves are big and visible
+            side = !side;
+            float reach = 0.5f + 0.5f * rnd.nextFloat();
+            panT = clamp01(panCenter + (side ? 1f : -1f) * reach * move * 0.5f);
+            tiltT = clamp01(tiltCenter + (rnd.nextFloat() * 2f - 1f) * move * 0.4f);
             if (strobeMode == 1 && beatStrength > 0.8f) strobeLeft = 0.18f;
         }
 
@@ -129,7 +134,7 @@ public final class Dmx {
         void drift(float dt, float speed) {
             ambientT += dt * (0.15 + 0.6 * speed);
             panT = clamp01(panCenter + 0.5f * move * (float) Math.sin(ambientT));
-            tiltT = clamp01(tiltCenter + 0.35f * move * (float) Math.sin(ambientT * 1.7 + 0.6));
+            tiltT = clamp01(tiltCenter + 0.4f * move * (float) Math.sin(ambientT * 1.7 + 0.6));
         }
 
         /** Writes the channels for color {@code rgb} (0..1, brightness included) into the universe. */
@@ -144,7 +149,11 @@ public final class Dmx {
             float cr = level > 1e-4f ? r / level : 0f, cg = level > 1e-4f ? g / level : 0f, cb = level > 1e-4f ? b / level : 0f;
             float bright = clamp01(brightness) * clamp01(lightsLevel);
             // LED fixtures are linear; the frames are perceptual → gamma like the strips
-            float lin = (float) Math.pow(clamp01(level), 1.6) * bright;
+            // the loudest moments of the last seconds count as full: beat peaks really reach 255
+            peak = Math.max(Math.max(level, 0.3f), peak - dt * 0.12f);
+            float norm = clamp01(level / peak);
+            // no extra gamma: fixtures have their own dimmer curve
+            float lin = norm * bright;
             boolean hasDimmer = false, hasWheel = false;
             for (int role : ro) {
                 hasDimmer |= role == DIMMER;
