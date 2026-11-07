@@ -25,7 +25,7 @@ final class Strip {
     float blur = 0f;       // 0 = none
     // ambient mode
     int ambientEffect = -1;        // -1 = same as the lights, else Ambient.*
-    int ambientColor = 0xFF8A2A;
+    int ambientColor = -1;            // -1 = same as the lights
     // strobe overlay
     int strobeTrigger = 0; // off
     int strobeColor = 0xFFFFFF;
@@ -100,7 +100,7 @@ final class Strip {
         s.variant = o.optInt("variant", 0);
         s.blur = (float) o.optDouble("blur", 0.0);
         s.ambientEffect = o.optInt("ambientEffect", -1);
-        s.ambientColor = o.optInt("ambientColor", 0xFF8A2A);
+        s.ambientColor = o.optInt("ambientColor", -1);
         s.brightnessMode = Math.max(0, Math.min(2, o.optInt("brightnessMode", 0)));
         return s;
     }

@@ -129,7 +129,7 @@ public final class Dmx {
         /** Music: what it shows (FX_*), its own palette (-1 = the lights'), its color for the solid effects. */
         public volatile int effect = FX_LIKE, palette = -1, color = 0xFF2A6D;
         /** Just lights: own animation (-1 = the lights') and color. */
-        public volatile int ambientEffect = -1, ambientColor = 0xFF8A2A;
+        public volatile int ambientEffect = -1, ambientColor = -1;
         /** Moving heads: movement type, its tempo (0.5 = one cycle per bar) and the gobo. */
         public volatile int movement = MOVE_SWING, gobo = 0;
         public volatile float moveSpeed = 0.5f;
@@ -220,7 +220,7 @@ public final class Dmx {
 
         /** The light's own color in "Just lights". */
         float[] ambientColor(float[] shared, int i, float dt, Ambient.Settings lights) {
-            if (ambientEffect < 0 && palette < 0) {
+            if (ambientEffect < 0 && palette < 0 && ambientColor < 0) {
                 one[0] = shared[3 * i];
                 one[1] = shared[3 * i + 1];
                 one[2] = shared[3 * i + 2];
@@ -231,8 +231,9 @@ public final class Dmx {
             ownAs.brightness = 1f;
             if (ambientEffect >= 0) ownAs.animation = ambientEffect;
             if (palette >= 0) ownAs.palette = Math.min(palette, Palettes.count() - 1);
-            ownAs.color = ambientColor;
-            float[] c = ownAmbient.render(dt, ownAs, new int[]{ambientColor});
+            int col = ambientColor >= 0 ? ambientColor : LampColors.at(x, lights.color);
+            ownAs.color = ambientColor >= 0 ? ambientColor : lights.color;
+            float[] c = ownAmbient.render(dt, ownAs, new int[]{col});
             one[0] = c[0];
             one[1] = c[1];
             one[2] = c[2];
@@ -511,7 +512,10 @@ public final class Dmx {
             Ambient.Settings own = new Ambient.Settings();
             own.copyFrom(s);
             own.brightness = 1f;
-            float[] shared = ambient.render(dt, own, null);
+            // static colors: every light takes the lamp color at its place
+            int[] cols = new int[fixtures.size()];
+            for (int i = 0; i < cols.length; i++) cols[i] = LampColors.at(xs[i], s.color);
+            float[] shared = ambient.render(dt, own, cols);
             float[] rgb = new float[3 * fixtures.size()];
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
             for (int i = 0; i < fixtures.size(); i++) {

@@ -725,7 +725,12 @@ public class SyncService extends Service {
                     Integer c = lc.get(ch.ids[i]);
                     perLight[i] = c != null ? c : as.color;
                 }
-                if (hue) hueRgb = hueAmb.render(dt, as, perLight);
+                if (hue) {
+                    hueRgb = hueAmb.render(dt, as, perLight);
+                    app.huebeat.core.LampColors.set(ch.x, perLight);
+                } else {
+                    app.huebeat.core.LampColors.clear();
+                }
                 dmxRun.update(prefs);
                 dmxRun.out.renderAmbient(dt, as);
                 dmxRun.send(stripSock);

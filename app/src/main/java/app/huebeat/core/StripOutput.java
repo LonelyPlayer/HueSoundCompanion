@@ -24,9 +24,10 @@ public final class StripOutput {
     public final float[] segX;
     public final Renderer renderer;
     public final StripEffect effect;
-    /** Ambient mode: the strip's own animation (-1 = same as the lights) and color. */
+    /** Ambient mode: the strip's own animation (-1 = same as the lights) and color (-1 = the lights'). */
     public volatile int ambientEffect = -1;
-    public volatile int ambientColor = 0xFF8A2A;
+    public volatile int ambientColor = -1;
+    private int[] pixelColors;
     private Ambient ambient;
     private final Ambient.Settings ambientOwn = new Ambient.Settings();
 
@@ -118,11 +119,18 @@ public final class StripOutput {
         ambientOwn.copyFrom(lights);
         if (ambientEffect >= 0) ambientOwn.animation = ambientEffect;
         if (palette >= 0) ambientOwn.palette = palette;
-        ambientOwn.color = ambientColor;
+        int own = ambientColor;
+        ambientOwn.color = own >= 0 ? own : lights.color;
         ambientOwn.speed = effect.speed;
+        // static colors: each pixel its color; "same as the lights" = the lamps' colors along the strip
+        if (pixelColors == null || pixelColors.length != span) pixelColors = new int[span];
+        for (int p = 0; p < span; p++) {
+            float x = span == 1 ? 0f : -1f + 2f * p / (span - 1);
+            pixelColors[p] = own >= 0 ? own : LampColors.at(x, lights.color);
+        }
         ambientOwn.brightness = 1f;
         lightsLevel = lights.brightness;
-        float[] px = ambient.render(dt, ambientOwn, null);
+        float[] px = ambient.render(dt, ambientOwn, pixelColors);
         System.arraycopy(px, 0, logical, 0, logical.length);
         applyBlur();
         return logical;

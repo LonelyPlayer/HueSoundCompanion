@@ -25,7 +25,7 @@ final class DmxLight {
     int palette = -1;           // -1 = same as the lights
     int color = 0xFF2A6D;
     int ambientEffect = -1;     // -1 = same as the lights
-    int ambientColor = 0xFF8A2A;
+    int ambientColor = -1;            // -1 = same as the lights
     int movement = Dmx.MOVE_SWING;
     float moveSpeed = 0.5f;
     int gobo = 0;
@@ -68,7 +68,7 @@ final class DmxLight {
         d.palette = o.optInt("palette", -1);
         d.color = o.optInt("color", 0xFF2A6D);
         d.ambientEffect = o.optInt("ambientEffect", -1);
-        d.ambientColor = o.optInt("ambientColor", 0xFF8A2A);
+        d.ambientColor = o.optInt("ambientColor", -1);
         d.movement = Math.max(0, Math.min(Dmx.MOVES.length - 1, o.optInt("movement", Dmx.MOVE_SWING)));
         d.moveSpeed = (float) o.optDouble("moveSpeed", 0.5);
         d.gobo = Math.max(0, Math.min(Dmx.GOBOS.length - 1, o.optInt("gobo", 0)));

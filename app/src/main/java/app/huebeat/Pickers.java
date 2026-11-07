@@ -36,6 +36,13 @@ final class Pickers {
 
     /** Color picker: changes are shown live through {@code set}; Cancel puts the old color back. */
     static void color(Activity a, String title, int initial, ColorSet set) {
+        color(a, title, initial, set, null);
+    }
+
+    /** With {@code same}, the dialog offers "Same as lights" (and {@code initial} < 0 means that is chosen). */
+    static void color(Activity a, String title, int initial, ColorSet set, Runnable same) {
+        final int start = initial;
+        if (initial < 0) initial = 0xFF8A2A;
         float[] hsv = new float[3];
         Color.colorToHSV(0xFF000000 | initial, hsv);
         final float[] cur = hsv.clone();
@@ -108,15 +115,26 @@ final class Pickers {
         }
         hs.addView(row);
         box.addView(hs, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(a, 8)));
-        apply.run();
+        if (start >= 0 || same == null) apply.run();
+        else {
+            int pure = Color.HSVToColor(new float[]{cur[0], 1f, 1f});
+            bars[1].setProgressDrawable(track(a, new int[]{0xFFFFFFFF, pure}));
+            bars[2].setProgressDrawable(track(a, new int[]{0xFF000000, Color.HSVToColor(new float[]{cur[0], cur[1], 1f})}));
+        }
 
-        new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        final int back = initial;
+        Runnable revert = () -> {
+            if (start < 0 && same != null) same.run();
+            else set.set(back);
+        };
+        AlertDialog.Builder bd = new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(title)
                 .setView(box)
                 .setPositiveButton("Done", null)
-                .setNegativeButton("Cancel", (d, w) -> set.set(initial))
-                .setOnCancelListener(d -> set.set(initial))
-                .show();
+                .setNegativeButton("Cancel", (d, w) -> revert.run())
+                .setOnCancelListener(d -> revert.run());
+        if (same != null) bd.setNeutralButton("Same as lights", (d, w) -> same.run());
+        bd.show();
     }
 
     private static GradientDrawable track(Activity a, int[] colors) {

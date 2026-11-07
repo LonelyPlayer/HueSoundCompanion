@@ -629,12 +629,20 @@ public class MainActivity extends Activity implements SyncState.Listener {
                             t.setText(stripTitle(st));
                         }));
                 body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
-                TextView colBtn = pickerButton("Strip color");
-                setDot(colBtn, st.ambientColor);
+                TextView colBtn = pickerButton("");
+                Runnable showCol = () -> {
+                    colBtn.setText(st.ambientColor < 0 ? "Strip color: same as lights" : "Strip color");
+                    setDot(colBtn, st.ambientColor < 0 ? prefs.ambient.color : st.ambientColor);
+                };
+                showCol.run();
                 colBtn.setOnClickListener(v -> Pickers.color(this, "Strip color", st.ambientColor, c -> {
                     st.ambientColor = c;
                     saveStrips();
-                    setDot(colBtn, c);
+                    showCol.run();
+                }, () -> {
+                    st.ambientColor = -1;
+                    saveStrips();
+                    showCol.run();
                 }));
                 body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
             } else {
@@ -830,12 +838,20 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         }));
                 body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
                 if (colors) {
-                    TextView colBtn = pickerButton("Light color");
-                    setDot(colBtn, d.ambientColor);
+                    TextView colBtn = pickerButton("");
+                    Runnable showCol = () -> {
+                        colBtn.setText(d.ambientColor < 0 ? "Light color: same as lights" : "Light color");
+                        setDot(colBtn, d.ambientColor < 0 ? prefs.ambient.color : d.ambientColor);
+                    };
+                    showCol.run();
                     colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.ambientColor, c -> {
                         d.ambientColor = c;
                         prefs.saveDmx(dmxList);
-                        setDot(colBtn, c);
+                        showCol.run();
+                    }, () -> {
+                        d.ambientColor = -1;
+                        prefs.saveDmx(dmxList);
+                        showCol.run();
                     }));
                     body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
                 }
