@@ -90,6 +90,14 @@ public final class ArtNet {
         /** Per port: can it output DMX, can it input, its universe (low 4 bits). */
         public boolean[] canOut = new boolean[4], canIn = new boolean[4];
         public int[] swOut = new int[4], swIn = new int[4];
+        /** Per port: DMX is being sent out right now; the port is set to sACN instead of Art-Net. */
+        public boolean[] sending = new boolean[4], sacn = new boolean[4];
+
+        /** The physical port letter: nodes that answer once per port number them by bind index. */
+        public char portLetter(int i) {
+            if (numPorts == 1 && bindIndex >= 1) return (char) ('A' + bindIndex - 1);
+            return (char) ('A' + i);
+        }
 
         /** Full 15-bit port-address of output port i. */
         public int outAddress(int i) {
@@ -132,6 +140,8 @@ public final class ArtNet {
             n.canIn[i] = (type & 0x40) != 0;
             n.swIn[i] = b[186 + i] & 0x0F;
             n.swOut[i] = b[190 + i] & 0x0F;
+            n.sending[i] = (b[182 + i] & 0x80) != 0;
+            n.sacn[i] = (b[182 + i] & 0x01) != 0;
         }
         n.bindIndex = len > 211 ? b[211] & 0xFF : 0;
         return n;

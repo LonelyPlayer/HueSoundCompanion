@@ -186,6 +186,16 @@ public class DmxSetupActivity extends Activity {
         });
         testRow.addView(sw);
         root.addView(testRow);
+        TextView lightUp = Ui.chip(this, "Light up (safe test values)");
+        lightUp.setTextColor(Ui.ACCENT);
+        lightUp.setOnClickListener(v -> {
+            int[] tv = new int[light.roles.length];
+            for (int i = 0; i < tv.length; i++) tv[i] = safeValue(light.roles[i]);
+            testValues = tv;
+            if (!sw.isChecked()) sw.setChecked(true); // starts the tester
+            else refreshChannels();
+        });
+        root.addView(lightUp, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), 0, Ui.dp(this, 6), 0, Ui.dp(this, 6)));
         channelList = Ui.column(this);
         root.addView(channelList);
 
@@ -305,6 +315,20 @@ public class DmxSetupActivity extends Activity {
         channelList.addView(plusMinus, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 4), 0, 0));
     }
 
+    /** A value per role that makes the light visibly shine: full dimmer and colors, open shutter, head centered. */
+    private static int safeValue(int role) {
+        switch (role) {
+            case Dmx.FULL: case Dmx.DIMMER: case Dmx.RED: case Dmx.GREEN: case Dmx.BLUE: case Dmx.WHITE: case Dmx.UV:
+                return 255;
+            case Dmx.PAN: case Dmx.TILT:
+                return 128;
+            case Dmx.WHEEL:
+                return 5; // white
+            default:
+                return 0; // strobe off / shutter open, speed fast, gobo open, programs off
+        }
+    }
+
     private static int matchingPreset(int[] roles) {
         for (int i = 0; i < Dmx.CUSTOM; i++) if (java.util.Arrays.equals(Dmx.PRESETS[i].roles, roles)) return i;
         return Dmx.CUSTOM;
@@ -335,6 +359,8 @@ public class DmxSetupActivity extends Activity {
         light.address = parse(address, light.address, 1, 512);
         if (light.ip.isEmpty()) {
             ip.setError("Enter the node's IP address");
+            ip.requestFocus();
+            android.widget.Toast.makeText(this, "Pick a node above or enter its IP address", android.widget.Toast.LENGTH_LONG).show();
             return;
         }
         List<DmxLight> all = prefs.dmxLights();
@@ -400,9 +426,30 @@ public class DmxSetupActivity extends Activity {
                     return;
                 }
                 searchState.setText(res.size() == 1 ? "1 node found" : res.size() + " nodes found");
-                for (ArtNet.Node n : res) nodes.addView(nodeCard(n), Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+                boolean picked = false;
+                for (ArtNet.Node n : res) {
+                    View card = nodeCard(n);
+                    nodes.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+                    // nothing entered yet: take the first node with an output port right away
+                    if (!picked && ip.getText().toString().trim().isEmpty() && hasOut(n)) {
+                        card.performClick();
+                        picked = true;
+                    } else if (n.ip.equals(ip.getText().toString().trim())) {
+                        markUsing(card);
+                    }
+                }
             });
         }, "artnet-search").start();
+    }
+
+    private static boolean hasOut(ArtNet.Node n) {
+        for (int i = 0; i < n.numPorts; i++) if (n.canOut[i]) return true;
+        return false;
+    }
+
+    private void markUsing(View card) {
+        Object tag = card.getTag();
+        if (tag instanceof TextView) ((TextView) tag).setText("✓ Using this node");
     }
 
     private View nodeCard(ArtNet.Node n) {
@@ -415,20 +462,30 @@ public class DmxSetupActivity extends Activity {
         for (int i = 0; i < n.numPorts; i++) {
             if (ports.length() > 0) ports.append('\n');
             String dir = n.canOut[i] ? "DMX out" : n.canIn[i] ? "DMX in" : "port";
-            ports.append("Port ").append((char) ('A' + i)).append(" · ").append(dir)
+            ports.append("Port ").append(n.portLetter(i)).append(" · ").append(dir)
                     .append(" · universe ").append(n.canOut[i] ? n.outAddress(i) : ((n.net << 8) | (n.subNet << 4) | n.swIn[i]));
+            if (n.canOut[i]) {
+                ports.append(n.sending[i] ? " · sending DMX now" : " · idle");
+                if (n.sacn[i]) ports.append(" · set to sACN");
+            }
             if (n.canOut[i]) outPorts.add(i);
         }
         if (ports.length() == 0) ports.append("No port information");
         card.addView(Ui.text(this, ports.toString(), 13, Ui.SUB, false));
         TextView hint = Ui.text(this, "Tap to use this node", 12, Ui.ACCENT, true);
         card.addView(hint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 6), 0, 0));
+        card.setTag(hint);
         card.setOnClickListener(v -> {
             ip.setText(n.ip);
-            light.protocol = 0;
+            ip.setError(null);
+            light.protocol = !outPorts.isEmpty() && n.sacn[outPorts.get(0)] ? 1 : 0;
             refreshProto();
             if (!outPorts.isEmpty()) universe.setText(String.valueOf(n.outAddress(outPorts.get(0))));
-            hint.setText("Using this node");
+            for (int k = 0; k < nodes.getChildCount(); k++) {
+                Object t = nodes.getChildAt(k).getTag();
+                if (t instanceof TextView) ((TextView) t).setText("Tap to use this node");
+            }
+            hint.setText("✓ Using this node · port " + (outPorts.isEmpty() ? "?" : String.valueOf(n.portLetter(outPorts.get(0)))));
         });
 
         LinearLayout actions = Ui.row(this);
@@ -460,7 +517,7 @@ public class DmxSetupActivity extends Activity {
         box.setPadding(p, Ui.dp(this, 8), p, 0);
         List<EditText> fields = new ArrayList<>();
         for (int port : outPorts) {
-            box.addView(label("Port " + (char) ('A' + port) + " universe"));
+            box.addView(label("Port " + n.portLetter(port) + " universe"));
             EditText e = field(String.valueOf(n.outAddress(port)), InputType.TYPE_CLASS_NUMBER);
             box.addView(e);
             fields.add(e);
