@@ -230,6 +230,7 @@ public final class Dmx {
             ownAs.copyFrom(lights);
             ownAs.brightness = 1f;
             if (ambientEffect >= 0) ownAs.animation = ambientEffect;
+            ownAmbient.follow = ambientEffect < 0 ? Ambient.master : null;
             if (palette >= 0) ownAs.palette = Math.min(palette, Palettes.count() - 1);
             int col = ambientColor >= 0 ? ambientColor : LampColors.at(x, lights.color);
             ownAs.color = ambientColor >= 0 ? ambientColor : lights.color;
@@ -515,6 +516,7 @@ public final class Dmx {
             // static colors: every light takes the lamp color at its place
             int[] cols = new int[fixtures.size()];
             for (int i = 0; i < cols.length; i++) cols[i] = LampColors.at(xs[i], s.color);
+            ambient.follow = Ambient.master;
             float[] shared = ambient.render(dt, own, cols);
             float[] rgb = new float[3 * fixtures.size()];
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);

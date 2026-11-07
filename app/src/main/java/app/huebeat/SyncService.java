@@ -682,6 +682,7 @@ public class SyncService extends Service {
             float[] pos = new float[ch.ids.length];
             for (int i = 0; i < pos.length; i++) pos[i] = Math.max(0f, Math.min(1f, (ch.x[i] + 1f) / 2f));
             Ambient hueAmb = new Ambient(pos, false);
+            Ambient clockAmb = new Ambient(new float[]{0.5f}, false);
             HueStream stream = hue ? new HueStream(area) : null;
             int[] perLight = new int[ch.ids.length];
             Ambient.Settings as = prefs.ambient;
@@ -728,8 +729,11 @@ public class SyncService extends Service {
                 if (hue) {
                     hueRgb = hueAmb.render(dt, as, perLight);
                     app.huebeat.core.LampColors.set(ch.x, perLight);
+                    Ambient.master = hueAmb;
                 } else {
                     app.huebeat.core.LampColors.clear();
+                    clockAmb.render(dt, as, null); // no lamps: a clock everything else follows
+                    Ambient.master = clockAmb;
                 }
                 dmxRun.update(prefs);
                 dmxRun.out.renderAmbient(dt, as);

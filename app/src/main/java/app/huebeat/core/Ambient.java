@@ -48,6 +48,10 @@ public final class Ambient {
     private final float[] seed;
     private final float[] tmp = new float[3];
     private double t;
+    /** The lamps' animation: outputs set to "same as the lights" run on its clock, so they stay in step. */
+    public static volatile Ambient master;
+    /** When set, this animation takes its time and fade/rainbow position from {@code follow}. */
+    public volatile Ambient follow;
     // state
     private final float[] flash, star, partyFrom, partyTo;
     private float partyMix = 1f, partyTimer;
@@ -89,7 +93,16 @@ public final class Ambient {
     public float[] render(float dt, Settings s, int[] colors) {
         dt = Math.max(0f, Math.min(0.1f, dt));
         float sp = (float) Math.pow(4.0, (s.speed - 0.5) * 2.0);
-        t += dt * sp;
+        Ambient lead = follow;
+        boolean synced = lead != null && lead != this;
+        if (synced) {
+            t = lead.t;
+            fadeIdx = lead.fadeIdx;
+            fadeFwd = lead.fadeFwd;
+            rainbowHue = lead.rainbowHue;
+        } else {
+            t += dt * sp;
+        }
         float tt = (float) t;
         int pal = s.palette;
         switch (s.animation) {
@@ -116,7 +129,7 @@ public final class Ambient {
                 break;
             case FADE: {
                 // LedFx Fade: whole output walks back and forth through the gradient
-                fadeIdx += 0.0075f * dt * sp * 2f;
+                if (!synced) fadeIdx += 0.0075f * dt * sp * 2f;
                 if (fadeIdx > 1) {
                     fadeIdx = 0;
                     fadeFwd = !fadeFwd;
@@ -127,7 +140,7 @@ public final class Ambient {
             }
             case RAINBOW: {
                 // LedFx Rainbow: hue steps 0.01 ten times per second at speed 1
-                rainbowHue += 0.1f * dt * sp;
+                if (!synced) rainbowHue += 0.1f * dt * sp;
                 for (int i = 0; i < n; i++) {
                     Palettes.hsv(rainbowHue + pos[i], 0.95f, 1f, tmp, 0);
                     put(i, tmp, 1f);

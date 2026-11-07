@@ -121,7 +121,10 @@ public final class StripOutput {
         if (palette >= 0) ambientOwn.palette = palette;
         int own = ambientColor;
         ambientOwn.color = own >= 0 ? own : lights.color;
-        ambientOwn.speed = effect.speed;
+        // "same as the lights": the lamps' speed and clock, so both show the same thing at the same time
+        boolean same = ambientEffect < 0;
+        ambientOwn.speed = same ? lights.speed : effect.speed;
+        ambient.follow = same ? Ambient.master : null;
         // static colors: each pixel its color; "same as the lights" = the lamps' colors along the strip
         if (pixelColors == null || pixelColors.length != span) pixelColors = new int[span];
         for (int p = 0; p < span; p++) {
