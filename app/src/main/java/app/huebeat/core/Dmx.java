@@ -302,12 +302,12 @@ public final class Dmx {
             float level = Math.max(r, Math.max(g, b));
             float cr = level > 1e-4f ? r / level : 0f, cg = level > 1e-4f ? g / level : 0f, cb = level > 1e-4f ? b / level : 0f;
             float bright = clamp01(brightness) * clamp01(lightsLevel);
-            // LED fixtures are linear; the frames are perceptual → gamma like the strips
-            // the loudest moments of the last seconds count as full: beat peaks really reach 255
-            peak = Math.max(Math.max(level, 0.3f), peak - dt * 0.12f);
+            // the loudest moments of the last seconds count as full, so beat peaks reach 255 —
+            // but only stretched from a high reference: quiet and dark moments must stay dark
+            peak = Math.max(Math.max(level, 0.6f), peak - dt * 0.12f);
             float norm = clamp01(level / peak);
-            // no extra gamma: fixtures have their own dimmer curve
-            float lin = norm * bright;
+            // LED dimmers are linear, eyes are not: without this curve 10 % already looks lit
+            float lin = norm * norm * bright;
             boolean hasDimmer = false, hasWheel = false;
             for (int role : ro) {
                 hasDimmer |= role == DIMMER;
