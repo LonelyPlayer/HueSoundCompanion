@@ -788,14 +788,332 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     // ------------------------------------------------------------------ DMX lights
 
+    /** The look controls of a DMX light card; for a group ({@code group}) they set every member. */
+    private void buildDmxBody(LinearLayout body, DmxLight d, boolean group) {
+        final boolean amb = ambientMode();
+        final boolean colors = app.huebeat.core.Dmx.hasColor(d.roles);
+        if (amb) {
+            body.addView(Ui.label(this, "Animation"));
+            TextView animBtn = pickerButton(dmxAmbientName(d) + "  ▸");
+            animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
+                    d.ambientEffect + 1, k -> {
+                        d.ambientEffect = k - 1;
+                        saveDmxFrom(d);
+                        animBtn.setText(dmxAmbientName(d) + "  ▸");
+                    }));
+            body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            if (colors) {
+                TextView colBtn = pickerButton("");
+                Runnable showCol = () -> {
+                    colBtn.setText(d.ambientColor < 0 ? "Light color: same as lights" : "Light color");
+                    setDot(colBtn, d.ambientColor < 0 ? prefs.ambient.color : d.ambientColor);
+                };
+                showCol.run();
+                colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.ambientColor, c -> {
+                    d.ambientColor = c;
+                    saveDmxFrom(d);
+                    showCol.run();
+                }, () -> {
+                    d.ambientColor = -1;
+                    saveDmxFrom(d);
+                    showCol.run();
+                }));
+                body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            }
+        } else {
+            body.addView(Ui.label(this, "Effect"));
+            LinearLayout colorBox = Ui.column(this);
+            TextView fxBtn = pickerButton(app.huebeat.core.Dmx.EFFECTS[d.effect] + "  ▸");
+            body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            body.addView(colorBox);
+            Runnable showColor = () -> {
+                colorBox.removeAllViews();
+                boolean solid = d.effect == app.huebeat.core.Dmx.FX_SOLID || d.effect == app.huebeat.core.Dmx.FX_SOLID_PULSE;
+                if (!solid || !colors) return;
+                TextView colBtn = pickerButton("Light color");
+                setDot(colBtn, d.color);
+                colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.color, c -> {
+                    d.color = c;
+                    saveDmxFrom(d);
+                    setDot(colBtn, c);
+                }));
+                colorBox.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            };
+            fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", app.huebeat.core.Dmx.EFFECTS,
+                    app.huebeat.core.Dmx.EFFECT_CATEGORIES, d.effect, k -> {
+                        d.effect = k;
+                        saveDmxFrom(d);
+                        fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
+                        showColor.run();
+                    }));
+            showColor.run();
+        }
+        if (colors) {
+            body.addView(Ui.label(this, "Colors"));
+            body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> d.palette, v -> {
+                d.palette = v;
+                saveDmxFrom(d);
+            }));
+        }
+        body.addView(Ui.label(this, "Brightness"));
+        body.addView(Ui.slider(this, d.brightness, v -> {
+            d.brightness = Math.max(0.02f, v);
+            saveDmxFrom(d);
+        }));
+        if (!group) {
+            body.addView(Ui.label(this, "Place in the room (left … right)"));
+            body.addView(Ui.slider(this, (d.x + 1f) / 2f, v -> {
+                d.x = v * 2f - 1f;
+                saveDmxFrom(d);
+            }));
+        }
+        if (app.huebeat.core.Dmx.moves(d.roles)) {
+            body.addView(Ui.label(this, "Movement"));
+            body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.MOVES, () -> d.movement, v -> {
+                d.movement = v;
+                saveDmxFrom(d);
+            }));
+            body.addView(Ui.label(this, "Movement size (0 = stays on the aim)"));
+            body.addView(Ui.slider(this, d.move, v -> {
+                d.move = v;
+                saveDmxFrom(d);
+            }));
+            body.addView(Ui.label(this, amb ? "Movement speed" : "Movement speed (middle = one cycle per bar)"));
+            body.addView(Ui.slider(this, d.moveSpeed, v -> {
+                d.moveSpeed = v;
+                saveDmxFrom(d);
+            }));
+            if (!group) {
+                body.addView(Ui.label(this, "Aim: pan"));
+                body.addView(Ui.slider(this, d.panCenter, v -> {
+                    d.panCenter = v;
+                    saveDmxFrom(d);
+                }));
+                body.addView(Ui.label(this, "Aim: tilt"));
+                body.addView(Ui.slider(this, d.tiltCenter, v -> {
+                    d.tiltCenter = v;
+                    saveDmxFrom(d);
+                }));
+            } else {
+                body.addView(Ui.label(this, "Together"));
+                body.addView(Ui.chipRow(this, new String[]{"Same moves", "Mirrored", "Chase"}, () -> d.together, v -> {
+                    d.together = v;
+                    saveDmxFrom(d);
+                }));
+            }
+        }
+        if (app.huebeat.core.Dmx.hasGobo(d.roles)) {
+            body.addView(Ui.label(this, "Gobo"));
+            body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.GOBOS, () -> d.gobo, v -> {
+                d.gobo = v;
+                saveDmxFrom(d);
+            }));
+        }
+        if (app.huebeat.core.Dmx.hasStrobe(d.roles)) {
+            body.addView(Ui.label(this, "Built-in strobe"));
+            body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.STROBE_MODES, () -> d.strobeMode, v -> {
+                d.strobeMode = v;
+                saveDmxFrom(d);
+            }));
+        }
+    }
+
+    /** A group's card: one set of look controls for all members, then each member's place and aim. */
+    private View groupCard(String name, android.content.SharedPreferences ui) {
+        List<DmxLight> members = new ArrayList<>();
+        for (DmxLight x : dmxList) if (name.equals(x.group)) members.add(x);
+        final DmxLight lead = members.get(0);
+        LinearLayout card = Ui.column(this);
+        card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
+        card.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10));
+        LinearLayout head = Ui.row(this);
+        final String key = "open_dmxgroup_" + name;
+        boolean open = ui.getBoolean(key, false);
+        TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
+        chev.setPadding(0, 0, Ui.dp(this, 10), 0);
+        head.addView(chev);
+        String what = ambientMode() ? dmxAmbientName(lead) : app.huebeat.core.Dmx.EFFECTS[lead.effect];
+        TextView t = Ui.text(this, name + "\n" + members.size() + " lights · " + what, 15, Ui.TEXT, true);
+        t.setLineSpacing(0, 1.15f);
+        head.addView(t, Ui.lp(0, Ui.WRAP, 1));
+        TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
+        gear.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
+        gear.setContentDescription("Group settings");
+        gear.setOnClickListener(v -> groupSettings(name));
+        head.addView(gear);
+        Switch on = new Switch(this);
+        boolean any = false;
+        for (DmxLight m : members) any |= m.enabled;
+        on.setChecked(any);
+        on.setOnCheckedChangeListener((bv, checked) -> {
+            for (DmxLight m : members) m.enabled = checked;
+            prefs.saveDmx(dmxList);
+            refresh();
+        });
+        head.addView(on);
+        card.addView(head);
+
+        LinearLayout body = Ui.column(this);
+        body.setPadding(0, 0, Ui.dp(this, 6), Ui.dp(this, 4));
+        body.setVisibility(open ? View.VISIBLE : View.GONE);
+        head.setClickable(true);
+        head.setOnClickListener(v -> {
+            boolean o = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(o ? View.VISIBLE : View.GONE);
+            chev.setText(o ? "▾" : "▸");
+            ui.edit().putBoolean(key, o).apply();
+        });
+        buildDmxBody(body, lead, true);
+
+        body.addView(section("Members"));
+        boolean moves = app.huebeat.core.Dmx.moves(lead.roles);
+        for (DmxLight m : members) {
+            final int mi = dmxList.indexOf(m);
+            LinearLayout mc = Ui.column(this);
+            mc.setBackground(Ui.rounded(Ui.CARD_2, Ui.dp(this, 12)));
+            mc.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8));
+            LinearLayout mh = Ui.row(this);
+            mh.addView(Ui.text(this, m.name + " · Ch " + m.address + "–" + m.lastChannel(), 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            TextView mg = Ui.text(this, "⚙", 18, Ui.SUB, false);
+            mg.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
+            mg.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class)
+                    .putExtra(DmxSetupActivity.EXTRA_INDEX, mi), REQ_DMX));
+            mh.addView(mg);
+            Switch ms = new Switch(this);
+            ms.setChecked(m.enabled);
+            ms.setOnCheckedChangeListener((bv, c) -> {
+                m.enabled = c;
+                prefs.saveDmx(dmxList);
+                refresh();
+            });
+            mh.addView(ms);
+            mc.addView(mh);
+            mc.addView(Ui.label(this, "Place in the room (left … right)"));
+            mc.addView(Ui.slider(this, (m.x + 1f) / 2f, v -> {
+                m.x = v * 2f - 1f;
+                prefs.saveDmx(dmxList);
+            }));
+            if (moves) {
+                mc.addView(Ui.label(this, "Aim: pan"));
+                mc.addView(Ui.slider(this, m.panCenter, v -> {
+                    m.panCenter = v;
+                    prefs.saveDmx(dmxList);
+                }));
+                mc.addView(Ui.label(this, "Aim: tilt"));
+                mc.addView(Ui.slider(this, m.tiltCenter, v -> {
+                    m.tiltCenter = v;
+                    prefs.saveDmx(dmxList);
+                }));
+            }
+            body.addView(mc, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        }
+        card.addView(body);
+        return card;
+    }
+
+    /** Pick lights of the same type and give the group a name. */
+    private void makeGroup() {
+        List<DmxLight> loose = new ArrayList<>();
+        for (DmxLight x : dmxList) if (x.group.isEmpty()) loose.add(x);
+        String[] names = new String[loose.size()];
+        for (int i = 0; i < names.length; i++) names[i] = loose.get(i).name + " (Ch " + loose.get(i).address + ")";
+        boolean[] checked = new boolean[names.length];
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        android.widget.EditText nameField = new android.widget.EditText(this);
+        nameField.setHint("Group name, e.g. PicoSpots");
+        nameField.setSingleLine(true);
+        nameField.setTextColor(Ui.TEXT);
+        nameField.setHintTextColor(0xFF5C5D66);
+        box.addView(nameField);
+        for (int i = 0; i < names.length; i++) {
+            final int k = i;
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(names[i]);
+            cb.setTextColor(Ui.TEXT);
+            cb.setOnCheckedChangeListener((bv, c) -> checked[k] = c);
+            box.addView(cb);
+        }
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Group lights")
+                .setView(box)
+                .setPositiveButton("Group", (dlg, w) -> {
+                    List<DmxLight> chosen = new ArrayList<>();
+                    for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(loose.get(i));
+                    if (chosen.size() < 2) {
+                        android.widget.Toast.makeText(this, "Pick at least two lights", android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    for (DmxLight c : chosen) {
+                        if (!java.util.Arrays.equals(c.roles, chosen.get(0).roles)) {
+                            android.widget.Toast.makeText(this, "Only lights of the same type can be grouped", android.widget.Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                    }
+                    String gname = nameField.getText().toString().trim();
+                    if (gname.isEmpty()) gname = chosen.get(0).name.replaceAll("\\s*\\d+$", "") + "s";
+                    for (DmxLight o : dmxList) if (gname.equals(o.group)) gname = gname + " 2";
+                    for (DmxLight c : chosen) {
+                        c.group = gname;
+                        if (c != chosen.get(0)) c.copyLookFrom(chosen.get(0));
+                    }
+                    prefs.saveDmx(dmxList);
+                    rebuildDmx();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void groupSettings(String name) {
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setText(name);
+        field.setSingleLine(true);
+        field.setTextColor(Ui.TEXT);
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        box.addView(field);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Group")
+                .setView(box)
+                .setPositiveButton("Rename", (dlg, w) -> {
+                    String n = field.getText().toString().trim();
+                    if (n.isEmpty()) return;
+                    for (DmxLight x : dmxList) if (name.equals(x.group)) x.group = n;
+                    prefs.saveDmx(dmxList);
+                    rebuildDmx();
+                })
+                .setNeutralButton("Ungroup", (dlg, w) -> {
+                    for (DmxLight x : dmxList) if (name.equals(x.group)) x.group = "";
+                    prefs.saveDmx(dmxList);
+                    rebuildDmx();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Saves the DMX lights; a grouped light passes its shared look on to the rest of its group. */
+    private void saveDmxFrom(DmxLight d) {
+        if (!d.group.isEmpty()) {
+            for (DmxLight o : dmxList) if (o != d && d.group.equals(o.group)) o.copyLookFrom(d);
+        }
+        prefs.saveDmx(dmxList);
+    }
+
     private void rebuildDmx() {
         if (dmxBox == null) return;
         dmxBox.removeAllViews();
         dmxList = prefs.dmxLights();
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        java.util.Set<String> shownGroups = new java.util.HashSet<>();
         for (int i = 0; i < dmxList.size(); i++) {
             final int idx = i;
             final DmxLight d = dmxList.get(i);
+            if (!d.group.isEmpty()) {
+                if (shownGroups.add(d.group)) dmxBox.addView(groupCard(d.group, ui), Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
+                continue;
+            }
             LinearLayout card = Ui.column(this);
             card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
             card.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10));
@@ -836,127 +1154,19 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 chev.setText(o ? "▾" : "▸");
                 ui.edit().putBoolean(key, o).apply();
             });
-            final boolean amb = ambientMode();
-            final boolean colors = app.huebeat.core.Dmx.hasColor(d.roles);
-            if (amb) {
-                body.addView(Ui.label(this, "Animation"));
-                TextView animBtn = pickerButton(dmxAmbientName(d) + "  ▸");
-                animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
-                        d.ambientEffect + 1, k -> {
-                            d.ambientEffect = k - 1;
-                            prefs.saveDmx(dmxList);
-                            animBtn.setText(dmxAmbientName(d) + "  ▸");
-                        }));
-                body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
-                if (colors) {
-                    TextView colBtn = pickerButton("");
-                    Runnable showCol = () -> {
-                        colBtn.setText(d.ambientColor < 0 ? "Light color: same as lights" : "Light color");
-                        setDot(colBtn, d.ambientColor < 0 ? prefs.ambient.color : d.ambientColor);
-                    };
-                    showCol.run();
-                    colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.ambientColor, c -> {
-                        d.ambientColor = c;
-                        prefs.saveDmx(dmxList);
-                        showCol.run();
-                    }, () -> {
-                        d.ambientColor = -1;
-                        prefs.saveDmx(dmxList);
-                        showCol.run();
-                    }));
-                    body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-                }
-            } else {
-                body.addView(Ui.label(this, "Effect"));
-                LinearLayout colorBox = Ui.column(this);
-                TextView fxBtn = pickerButton(app.huebeat.core.Dmx.EFFECTS[d.effect] + "  ▸");
-                body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
-                body.addView(colorBox);
-                Runnable showColor = () -> {
-                    colorBox.removeAllViews();
-                    boolean solid = d.effect == app.huebeat.core.Dmx.FX_SOLID || d.effect == app.huebeat.core.Dmx.FX_SOLID_PULSE;
-                    if (!solid || !colors) return;
-                    TextView colBtn = pickerButton("Light color");
-                    setDot(colBtn, d.color);
-                    colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.color, c -> {
-                        d.color = c;
-                        prefs.saveDmx(dmxList);
-                        setDot(colBtn, c);
-                    }));
-                    colorBox.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-                };
-                fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", app.huebeat.core.Dmx.EFFECTS,
-                        app.huebeat.core.Dmx.EFFECT_CATEGORIES, d.effect, k -> {
-                            d.effect = k;
-                            prefs.saveDmx(dmxList);
-                            fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
-                            showColor.run();
-                        }));
-                showColor.run();
-            }
-            if (colors) {
-                body.addView(Ui.label(this, "Colors"));
-                body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> d.palette, v -> {
-                    d.palette = v;
-                    prefs.saveDmx(dmxList);
-                }));
-            }
-            body.addView(Ui.label(this, "Brightness"));
-            body.addView(Ui.slider(this, d.brightness, v -> {
-                d.brightness = Math.max(0.02f, v);
-                prefs.saveDmx(dmxList);
-            }));
-            body.addView(Ui.label(this, "Place in the room (left … right)"));
-            body.addView(Ui.slider(this, (d.x + 1f) / 2f, v -> {
-                d.x = v * 2f - 1f;
-                prefs.saveDmx(dmxList);
-            }));
-            if (app.huebeat.core.Dmx.moves(d.roles)) {
-                body.addView(Ui.label(this, "Movement"));
-                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.MOVES, () -> d.movement, v -> {
-                    d.movement = v;
-                    prefs.saveDmx(dmxList);
-                }));
-                body.addView(Ui.label(this, "Movement size (0 = stays on the aim)"));
-                body.addView(Ui.slider(this, d.move, v -> {
-                    d.move = v;
-                    prefs.saveDmx(dmxList);
-                }));
-                body.addView(Ui.label(this, amb ? "Movement speed" : "Movement speed (middle = one cycle per bar)"));
-                body.addView(Ui.slider(this, d.moveSpeed, v -> {
-                    d.moveSpeed = v;
-                    prefs.saveDmx(dmxList);
-                }));
-                body.addView(Ui.label(this, "Aim: pan"));
-                body.addView(Ui.slider(this, d.panCenter, v -> {
-                    d.panCenter = v;
-                    prefs.saveDmx(dmxList);
-                }));
-                body.addView(Ui.label(this, "Aim: tilt"));
-                body.addView(Ui.slider(this, d.tiltCenter, v -> {
-                    d.tiltCenter = v;
-                    prefs.saveDmx(dmxList);
-                }));
-            }
-            if (app.huebeat.core.Dmx.hasGobo(d.roles)) {
-                body.addView(Ui.label(this, "Gobo"));
-                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.GOBOS, () -> d.gobo, v -> {
-                    d.gobo = v;
-                    prefs.saveDmx(dmxList);
-                }));
-            }
-            if (app.huebeat.core.Dmx.hasStrobe(d.roles)) {
-                body.addView(Ui.label(this, "Built-in strobe"));
-                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.STROBE_MODES, () -> d.strobeMode, v -> {
-                    d.strobeMode = v;
-                    prefs.saveDmx(dmxList);
-                }));
-            }
+            buildDmxBody(body, d, false);
             card.addView(body);
             dmxBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
         }
         TextView add = Ui.button(this, "+ Add DMX light (Art-Net / sACN)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class), REQ_DMX));
+        int loose = 0;
+        for (DmxLight x : dmxList) if (x.group.isEmpty()) loose++;
+        if (loose >= 2) {
+            TextView grp = Ui.button(this, "+ Group lights", false);
+            grp.setOnClickListener(v -> makeGroup());
+            dmxBox.addView(grp, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        }
         dmxBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
     }
 

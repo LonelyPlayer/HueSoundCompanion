@@ -29,6 +29,9 @@ final class DmxLight {
     int movement = Dmx.MOVE_SWING;
     float moveSpeed = 0.5f;
     int gobo = 0;
+    /** Group name ("" = none); members share their look. How they move together: 0 same, 1 mirrored, 2 chase. */
+    String group = "";
+    int together = 0;
 
     JSONObject toJson() throws JSONException {
         JSONArray r = new JSONArray();
@@ -39,7 +42,7 @@ final class DmxLight {
                 .put("pan", (double) panCenter).put("tilt", (double) tiltCenter).put("move", (double) move)
                 .put("strobe", strobeMode).put("effect", effect).put("palette", palette).put("color", color)
                 .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor).put("movement", movement)
-                .put("moveSpeed", (double) moveSpeed).put("gobo", gobo);
+                .put("moveSpeed", (double) moveSpeed).put("gobo", gobo).put("group", group).put("together", together);
     }
 
     static DmxLight fromJson(JSONObject o) {
@@ -72,16 +75,19 @@ final class DmxLight {
         d.movement = Math.max(0, Math.min(Dmx.MOVES.length - 1, o.optInt("movement", Dmx.MOVE_SWING)));
         d.moveSpeed = (float) o.optDouble("moveSpeed", 0.5);
         d.gobo = Math.max(0, Math.min(Dmx.GOBOS.length - 1, o.optInt("gobo", 0)));
+        d.group = o.optString("group", "");
+        d.together = Math.max(0, Math.min(2, o.optInt("together", 0)));
         return d;
     }
 
     /** Everything that needs a new output when it changes. */
     String layoutKey() {
-        return ip + "|" + protocol + "|" + universe + "|" + address + "|" + x + "|" + roles.length;
+        return ip + "|" + protocol + "|" + universe + "|" + address + "|" + x + "|" + roles.length + "|" + group;
     }
 
     Dmx.Fixture fixture() {
         Dmx.Fixture f = new Dmx.Fixture(name, ip, protocol, universe, address, x, roles.clone());
+        if (!group.isEmpty()) f.seed(group); // same random moves for the whole group
         applyLive(f);
         return f;
     }
@@ -101,6 +107,23 @@ final class DmxLight {
         f.movement = movement;
         f.moveSpeed = moveSpeed;
         f.gobo = gobo;
+        f.together = group.isEmpty() ? 0 : together;
+    }
+
+    /** Takes over the look of another member of the same group (not its place, aim or switch). */
+    void copyLookFrom(DmxLight o) {
+        effect = o.effect;
+        palette = o.palette;
+        color = o.color;
+        ambientEffect = o.ambientEffect;
+        ambientColor = o.ambientColor;
+        movement = o.movement;
+        move = o.move;
+        moveSpeed = o.moveSpeed;
+        gobo = o.gobo;
+        strobeMode = o.strobeMode;
+        brightness = o.brightness;
+        together = o.together;
     }
 
     int lastChannel() {

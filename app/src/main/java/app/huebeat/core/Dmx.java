@@ -133,6 +133,8 @@ public final class Dmx {
         /** Moving heads: movement type, its tempo (0.5 = one cycle per bar) and the gobo. */
         public volatile int movement = MOVE_SWING, gobo = 0;
         public volatile float moveSpeed = 0.5f;
+        /** Groups: how members move together (0 same, 1 mirrored, 2 chase), this light's place in its group. */
+        public volatile int together = 0, memberIdx = 0, memberCount = 1;
         /** Channel tester: when not null, these raw values are sent instead of the show. */
         public volatile int[] test;
 
@@ -167,6 +169,11 @@ public final class Dmx {
             this.x = x;
             this.roles = roles;
             rnd = new Random(name.hashCode() * 31L + address);
+        }
+
+        /** Members of a group share the random choices (same swings, same wander points). */
+        public void seed(String group) {
+            rnd.setSeed(group.hashCode() * 7919L);
         }
 
         String key() {
@@ -250,7 +257,11 @@ public final class Dmx {
             float bpm = f != null && f.bpm > 0 ? f.bpm : 120f;
             float cps = ambient ? (0.02f + 0.2f * ambSpeed) * mul : bpm / 60f / 4f * mul;
             phase += dt * cps;
-            double a = 2 * Math.PI * phase;
+            boolean chase = together == 2 && memberCount > 1;
+            // chase: each member a step behind the one before it
+            double a = 2 * Math.PI * (phase - (chase ? (double) memberIdx / memberCount : 0));
+            // chase on beat-driven moves: the beat walks from member to member
+            boolean myBeat = beat && (!chase || barBeats % memberCount == memberIdx);
             float m = move;
             boolean snare = f != null && lastSnare != Integer.MIN_VALUE && f.snareCount != lastSnare;
             if (f != null) lastSnare = f.snareCount;
@@ -284,7 +295,7 @@ public final class Dmx {
                         panT = clamp01(panCenter + 0.5f * m * (float) Math.sin(a));
                         tiltT = clamp01(tiltCenter + 0.4f * m * (float) Math.sin(a * 1.7 + 0.6));
                         glide = 0.3f;
-                    } else if (beat) {
+                    } else if (myBeat) {
                         // to the other side of the aim point every beat: big, visible moves
                         side = !side;
                         float reach = 0.5f + 0.5f * rnd.nextFloat();
@@ -324,7 +335,7 @@ public final class Dmx {
                         nod = (float) (0.5 + 0.5 * Math.sin(a * 2));
                     } else {
                         // down on the beat, hold for a moment, then swing back up before the next one
-                        if (beat) nod = 0f;
+                        if (myBeat) nod = 0f;
                         nod += dt;
                         float per = 60f / bpm;
                         float down = Math.max(0.12f, per * 0.3f);
@@ -380,6 +391,8 @@ public final class Dmx {
             float k = 1f - (float) Math.exp(-dt / Math.max(0.02f, glideTau));
             pan += (panT - pan) * k;
             tilt += (tiltT - tilt) * k;
+            // mirrored groups: every second member swings the other way around its own aim
+            float panOut = together == 1 && memberIdx % 2 == 1 ? clamp01(2f * panCenter - pan) : pan;
             if (hasWheel) updateWheel(cr, cg, cb, level, dt);
             strobeLeft = Math.max(0f, strobeLeft - dt);
 
@@ -395,8 +408,8 @@ public final class Dmx {
                     case AMBER: v = 0; break;
                     case UV: v = Math.round((hasDimmer ? 1f : lin) * 255f); break;
                     case STROBE: v = strobeLeft > 0f ? 230 : buildStrobe > 0f ? Math.round(30 + 225 * buildStrobe) : 0; break;
-                    case PAN: v = (int) (clamp01(pan) * 65535f) >> 8; break;
-                    case PAN_FINE: v = (int) (clamp01(pan) * 65535f) & 0xFF; break;
+                    case PAN: v = (int) (clamp01(panOut) * 65535f) >> 8; break;
+                    case PAN_FINE: v = (int) (clamp01(panOut) * 65535f) & 0xFF; break;
                     case TILT: v = (int) (clamp01(tilt) * 65535f) >> 8; break;
                     case TILT_FINE: v = (int) (clamp01(tilt) * 65535f) & 0xFF; break;
                     case PT_SPEED: v = 0; break; // fastest: the app glides the movement itself

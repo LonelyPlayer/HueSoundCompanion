@@ -614,6 +614,21 @@ public class SyncService extends Service {
                     }
                     out = new Dmx.Output(fx);
                 }
+                // places within groups (for mirrored and chasing moves)
+                java.util.Map<String, Integer> count = new java.util.HashMap<>(), seen = new java.util.HashMap<>();
+                for (DmxLight d : cfg) if (!d.group.isEmpty()) count.merge(d.group, 1, Integer::sum);
+                for (int k = 0; k < cfg.size(); k++) {
+                    DmxLight d = cfg.get(k);
+                    Dmx.Fixture f = out.fixtures.get(k);
+                    if (d.group.isEmpty()) {
+                        f.memberIdx = 0;
+                        f.memberCount = 1;
+                    } else {
+                        int idx = seen.merge(d.group, 1, Integer::sum) - 1;
+                        f.memberIdx = idx;
+                        f.memberCount = count.get(d.group);
+                    }
+                }
             }
         }
 
