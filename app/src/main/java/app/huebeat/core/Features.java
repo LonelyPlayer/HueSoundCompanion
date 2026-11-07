@@ -28,6 +28,10 @@ public final class Features {
     public float tonality;
     /** Dominant pitch as a MIDI note number (e.g. 69 = A4), or 0 when no clear note. */
     public float pitch;
+    /** Melody note (MIDI number, fundamental found by harmonic summation in 150 Hz..1.1 kHz), 0 = none. */
+    public float melody;
+    /** How clearly that melody note stands out, 0..1. */
+    public float melodyConf;
     /** True when there is (practically) no audio. */
     public boolean silent = true;
     /** Raw input level for the UI meter, 0..1. */
@@ -48,6 +52,8 @@ public final class Features {
         f.tonality = tonality;
         f.silent = silent;
         f.pitch = pitch;
+        f.melody = melody;
+        f.melodyConf = melodyConf;
         f.inputMeter = inputMeter;
         return f;
     }

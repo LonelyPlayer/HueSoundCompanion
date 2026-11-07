@@ -148,7 +148,11 @@ public final class Renderer {
             case LightSettings.STYLE_SPECTRUM: spectrum(f, t, dt, s, beat, inten); break;
             case LightSettings.STYLE_AMBIENT: ambient(f, t, dt, s, beat, inten); break;
             case LightSettings.STYLE_PARTY: party(f, dt, s, beat, snare, inten, period); break;
-            default: beatStyle(f, dt, s, beat, snare, inten, period); break;
+            case LightSettings.STYLE_MELODY:
+                followMelody(f, dt, inten);
+                beatStyle(f, dt, s, beat, snare, inten, period, true);
+                break;
+            default: beatStyle(f, dt, s, beat, snare, inten, period, false); break;
         }
         return out;
     }
@@ -157,7 +161,27 @@ public final class Renderer {
     //   low:  soft swells that fade out slowly over the whole beat, lights never go dark
     //   high: sharp hits that drop off almost instantly to near-black between beats
 
-    private void beatStyle(Features f, float dt, LightSettings s, boolean beat, boolean snare, float inten, float period) {
+    /** Melody color: the note's pitch class as a point on the palette loop (C → C♯ → … → B → C). */
+    private float melX = 1f, melY = 0f;
+
+    private void followMelody(Features f, float dt, float inten) {
+        if (f.melody <= 0f || f.melodyConf < 0.08f) return; // no clear note: keep the last color
+        float pc = (f.melody / 12f) - (float) Math.floor(f.melody / 12f);
+        double a = 2 * Math.PI * pc;
+        // glide between notes: legato at low intensity, snappy at high; clearer notes move faster
+        float tau = lerp(0.35f, 0.07f, inten) / (0.4f + f.melodyConf);
+        float k = 1f - (float) Math.exp(-dt / tau);
+        melX += ((float) Math.cos(a) - melX) * k;
+        melY += ((float) Math.sin(a) - melY) * k;
+    }
+
+    private float melodyPos() {
+        float p = (float) (Math.atan2(melY, melX) / (2 * Math.PI));
+        return p < 0 ? p + 1f : p;
+    }
+
+    private void beatStyle(Features f, float dt, LightSettings s, boolean beat, boolean snare, float inten, float period,
+                           boolean melody) {
         if (beat) {
             beatIndex++;
             float strength = 0.6f + 0.4f * f.beatStrength;
@@ -176,7 +200,14 @@ public final class Renderer {
         for (int i = 0; i < n; i++) {
             env[i] = decay(env[i], dt, tau);
             sparkle[i] = decay(sparkle[i], dt, lerp(0.15f, 0.05f, inten));
-            color(i, s, rampPos + loudPos + rank[i] * 0.15f, f.keyHue, 0.95f);
+            if (melody) {
+                // Color movement spreads neighbouring notes' colors over the lamps
+                float pos = melodyPos() + (rank[i] - 0.5f) * 0.12f * s.colorMove;
+                // Auto palette is hue = keyHue + 0.45 * pos; this makes it hue = pos
+                color(i, s, pos, pos * 0.55f, 0.95f);
+            } else {
+                color(i, s, rampPos + loudPos + rank[i] * 0.15f, f.keyHue, 0.95f);
+            }
             setTarget(i, tmp, floor + (1f - floor) * env[i], sparkle[i] * 0.75f);
         }
         smooth(dt, lerp(0.06f, 0f, inten), lerp(0.12f, 0.02f, inten), s);

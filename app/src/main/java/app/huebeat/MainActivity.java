@@ -178,9 +178,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         HorizontalScrollView styleScroll = new HorizontalScrollView(this);
         styleScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout styles = Ui.row(this);
-        for (int i = 0; i < LightSettings.STYLE_NAMES.length; i++) {
-            final int s = i;
-            TextView chip = Ui.chip(this, LightSettings.STYLE_NAMES[i]);
+        for (int i = 0; i < LightSettings.STYLE_ORDER.length; i++) {
+            final int s = LightSettings.STYLE_ORDER[i];
+            TextView chip = Ui.chip(this, LightSettings.STYLE_NAMES[s]);
             chip.setOnClickListener(v -> {
                 prefs.light.style = s;
                 prefs.saveLight();
@@ -903,7 +903,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             rebuildLamps();
         }
         for (int i = 0; i < modeChips.size(); i++) Ui.setChipSelected(modeChips.get(i), i == mode);
-        for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), i == prefs.light.style);
+        for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), LightSettings.STYLE_ORDER[i] == prefs.light.style);
         boolean screenCols = prefs.light.screenColors;
         boolean screenStyle = prefs.light.style == LightSettings.STYLE_SCREEN;
         Ui.setChipSelected(screenChip, screenCols || screenStyle);

@@ -309,6 +309,15 @@ public final class Analyzer {
         float hue = (float) (Math.atan2(keyY, keyX) / (2 * Math.PI));
         if (hue < 0) hue += 1f;
         cur.keyHue = hue;
+        if (chromaMode != 2) {
+            // PCM input: the melody detector runs with the fine spectrum (every few frames); hold it between
+            cur.melody = silent ? 0f : melody;
+            cur.melodyConf = silent ? 0f : melodyConf;
+        } else {
+            // coarse spectrum only (Visualizer): the dominant peak is the best guess
+            cur.melody = cur.pitch;
+            cur.melodyConf = cur.pitch > 0 ? 0.5f : 0f;
+        }
         cur.tonality = clamp01((float) Math.sqrt(keyX * keyX + keyY * keyY) * 2.5f);
 
         cur.timeNanos = timeNanos;
@@ -332,6 +341,48 @@ public final class Analyzer {
         if (total > 1e-9f) applyChroma(smoothing);
     }
 
+    private float melody = 0f, melodyConf = 0f;
+    private float[] melMag;
+
+    /**
+     * Melody note from the fine spectrum: every candidate fundamental (150 Hz..1.1 kHz) is scored
+     * by its own peak plus its overtones (harmonic summation). Bass and drums have little energy
+     * there or no harmonic series, so the sung/played line usually wins.
+     */
+    private void updateMelody(float binHz) {
+        int nb = NC / 2;
+        if (melMag == null) melMag = new float[nb];
+        for (int k = 0; k < nb; k++) melMag[k] = (float) Math.sqrt(fftC.re[k] * fftC.re[k] + fftC.im[k] * fftC.im[k]);
+        int lo = Math.max(2, Math.round(150f / binHz)), hi = Math.min(nb / 5, Math.round(1100f / binHz));
+        float best = 0f, sum = 0f;
+        int bestK = -1;
+        for (int k = lo; k <= hi; k++) {
+            float sc = peak(k) + 0.6f * peak(2 * k) + 0.4f * peak(3 * k) + 0.25f * peak(4 * k);
+            sum += sc;
+            if (sc > best) {
+                best = sc;
+                bestK = k;
+            }
+        }
+        float mean = sum / Math.max(1, hi - lo + 1);
+        float ratio = mean > 1e-9f ? best / mean : 0f;
+        float conf = Math.max(0f, Math.min(1f, (ratio - 2.2f) / 4f));
+        if (bestK > 0 && conf > 0f) {
+            float a = melMag[bestK - 1], b = melMag[bestK], c = melMag[bestK + 1];
+            float den = a - 2 * b + c;
+            float off = Math.abs(den) > 1e-9f ? Math.max(-0.5f, Math.min(0.5f, 0.5f * (a - c) / den)) : 0f;
+            float freq = (bestK + off) * binHz;
+            melody = 69f + 12f * (float) (Math.log(freq / 440.0) / Math.log(2));
+        }
+        melodyConf = conf;
+    }
+
+    /** Spectrum magnitude at bin k, allowing for a slightly mistuned overtone (±1 bin). */
+    private float peak(int k) {
+        if (k + 1 >= melMag.length) return 0f;
+        return Math.max(melMag[k], Math.max(melMag[k - 1], melMag[k + 1]));
+    }
+
     private void updateChroma() {
         for (int i = 0; i < NC; i++) {
             fftC.re[i] = ring[(ringPos - NC + i) & (NC - 1)] * winC[i];
@@ -340,6 +391,7 @@ public final class Analyzer {
         fftC.transform();
         Arrays.fill(chroma, 0f);
         float binHz = (float) sampleRate / NC;
+        updateMelody(binHz);
         int lo = Math.round(98f / binHz), hi = Math.min(NC / 2, Math.round(4000f / binHz));
         float total = 0f;
         for (int k = lo; k < hi; k++) {
