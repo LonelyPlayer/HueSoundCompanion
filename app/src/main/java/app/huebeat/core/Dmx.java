@@ -71,10 +71,43 @@ public final class Dmx {
         return false;
     }
 
+    public static boolean hasGobo(int[] roles) {
+        for (int r : roles) if (r == GOBO) return true;
+        return false;
+    }
+
+    /** Can show colors (RGB channels or a color wheel); a plain dimmer or UV light can't. */
+    public static boolean hasColor(int[] roles) {
+        for (int r : roles) if (r == RED || r == GREEN || r == BLUE || r == WHEEL || r == WHITE) return true;
+        return false;
+    }
+
     public static boolean hasStrobe(int[] roles) {
         for (int r : roles) if (r == STROBE) return true;
         return false;
     }
+
+    // ------------------------------------------------------------------ per-light choices
+
+    /** What a light shows in music sync. */
+    public static final int FX_LIKE = 0, FX_BEAT = 1, FX_MELODY = 2, FX_CHORDS = 3, FX_SPECTRUM = 4, FX_AMBIENT = 5,
+            FX_PARTY = 6, FX_SOLID_PULSE = 7, FX_SOLID = 8, FX_OFF = 9;
+    public static final String[] EFFECTS = {"Like the lights", "Beat", "Melody", "Chords", "Spectrum", "Ambient", "Party",
+            "Solid color · pulse on beats", "Solid color · steady", "Off"};
+    public static final String[] EFFECT_CATEGORIES = {"Follow", "Own style", "Own style", "Own style", "Own style", "Own style",
+            "Own style", "Fixed color", "Fixed color", "Fixed color"};
+    private static final int[] FX_STYLE = {-1, LightSettings.STYLE_BEAT, LightSettings.STYLE_MELODY, LightSettings.STYLE_CHORDS,
+            LightSettings.STYLE_SPECTRUM, LightSettings.STYLE_AMBIENT, LightSettings.STYLE_PARTY, -1, -1, -1};
+
+    /** How a moving head moves. */
+    public static final int MOVE_FIXED = 0, MOVE_SWING = 1, MOVE_CIRCLE = 2, MOVE_EIGHT = 3, MOVE_WANDER = 4, MOVE_SWEEP = 5,
+            MOVE_NOD = 6, MOVE_MELODY = 7;
+    public static final String[] MOVES = {"Fixed", "Swing on beats", "Circle", "Figure 8", "Wander", "Sweep", "Nod on beats",
+            "Follow melody"};
+
+    /** Gobo choice: open, one of 7 gobos, or a new one every bar. */
+    public static final String[] GOBOS = {"Open", "1", "2", "3", "4", "5", "6", "7", "New every bar"};
+    static final int[] GOBO_DMX = {7, 23, 39, 54, 70, 86, 101, 117};
 
     // ------------------------------------------------------------------ one fixture at runtime
 
@@ -91,6 +124,13 @@ public final class Dmx {
         public volatile float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
         /** 0 = no strobe, 1 = on strong beats. */
         public volatile int strobeMode = 0;
+        /** Music: what it shows (FX_*), its own palette (-1 = the lights'), its color for the solid effects. */
+        public volatile int effect = FX_LIKE, palette = -1, color = 0xFF2A6D;
+        /** Just lights: own animation (-1 = the lights') and color. */
+        public volatile int ambientEffect = -1, ambientColor = 0xFF8A2A;
+        /** Moving heads: movement type, its tempo (0.5 = one cycle per bar) and the gobo. */
+        public volatile int movement = MOVE_SWING, gobo = 0;
+        public volatile float moveSpeed = 0.5f;
         /** Channel tester: when not null, these raw values are sent instead of the show. */
         public volatile int[] test;
 
@@ -103,6 +143,16 @@ public final class Dmx {
         private float strobeLeft = 0f;
         private double ambientT = 0;
         private final Random rnd;
+        private double phase = 0;
+        private float glide = 0.2f, nod = 0f, nodLevel = 0f, wanderLeft = 0f;
+        private int barBeats = 0, goboSlot = 1;
+        // own looks
+        private Renderer ownRenderer;
+        private Ambient ownAmbient;
+        private final LightSettings ownLs = new LightSettings();
+        private final Ambient.Settings ownAs = new Ambient.Settings();
+        private float env = 0f;
+        private final float[] one = new float[3];
 
         public Fixture(String name, String ip, int protocol, int universe, int address, float x, int[] roles) {
             this.name = name;
@@ -119,26 +169,173 @@ public final class Dmx {
             return ip + "|" + protocol + "|" + universe;
         }
 
-        /** Music: a new target to point at on beats. */
-        void onBeat(float beatStrength) {
-            if (move <= 0.001f) return;
-            // swing to the other side of the aim point every beat, so the moves are big and visible
-            side = !side;
-            float reach = 0.5f + 0.5f * rnd.nextFloat();
-            panT = clamp01(panCenter + (side ? 1f : -1f) * reach * move * 0.5f);
-            tiltT = clamp01(tiltCenter + (rnd.nextFloat() * 2f - 1f) * move * 0.4f);
-            if (strobeMode == 1 && beatStrength > 0.8f) strobeLeft = 0.18f;
+        /** The light's own color in music sync (or the shared one for "Like the lights"). */
+        float[] musicColor(float[] shared, int i, Features f, double t, float dt, LightSettings lights, boolean beat) {
+            int fx = effect;
+            if (fx == FX_LIKE && palette < 0) {
+                one[0] = shared[3 * i];
+                one[1] = shared[3 * i + 1];
+                one[2] = shared[3 * i + 2];
+                return one;
+            }
+            if (fx == FX_OFF) {
+                one[0] = one[1] = one[2] = 0f;
+                return one;
+            }
+            if (fx == FX_SOLID || fx == FX_SOLID_PULSE) {
+                float v = 1f;
+                if (fx == FX_SOLID_PULSE) {
+                    float inten = lights.intensity, period = f != null && f.bpm > 0 ? 60f / f.bpm : 0.5f;
+                    if (beat) env = 1f;
+                    float tau = Math.max(0.06f, (1 - inten) * Math.max(0.25f, period * 0.9f) + inten * 0.06f);
+                    env *= (float) Math.exp(-dt / tau);
+                    float floor = (0.45f - 0.43f * inten);
+                    v = floor + (1f - floor) * env;
+                }
+                int c = color;
+                one[0] = ((c >> 16) & 0xFF) / 255f * v;
+                one[1] = ((c >> 8) & 0xFF) / 255f * v;
+                one[2] = (c & 0xFF) / 255f * v;
+                return one;
+            }
+            // an own style (or "like the lights" in its own palette): its own renderer
+            if (ownRenderer == null) ownRenderer = new Renderer(new float[]{x});
+            ownLs.copyFrom(lights);
+            ownLs.maxBrightness = 1f;
+            if (FX_STYLE[fx] >= 0) ownLs.style = FX_STYLE[fx];
+            if (palette >= 0) {
+                ownLs.palette = Math.min(palette, Palettes.count() - 1);
+                ownLs.screenColors = false;
+            }
+            float[] c = ownRenderer.render(f, t, dt, ownLs);
+            one[0] = c[0];
+            one[1] = c[1];
+            one[2] = c[2];
+            return one;
         }
 
-        /** Just lights: a slow figure-eight around the aim point. */
-        void drift(float dt, float speed) {
-            ambientT += dt * (0.15 + 0.6 * speed);
-            panT = clamp01(panCenter + 0.5f * move * (float) Math.sin(ambientT));
-            tiltT = clamp01(tiltCenter + 0.4f * move * (float) Math.sin(ambientT * 1.7 + 0.6));
+        /** The light's own color in "Just lights". */
+        float[] ambientColor(float[] shared, int i, float dt, Ambient.Settings lights) {
+            if (ambientEffect < 0 && palette < 0) {
+                one[0] = shared[3 * i];
+                one[1] = shared[3 * i + 1];
+                one[2] = shared[3 * i + 2];
+                return one;
+            }
+            if (ownAmbient == null) ownAmbient = new Ambient(new float[]{clamp01((x + 1f) / 2f)}, false);
+            ownAs.copyFrom(lights);
+            ownAs.brightness = 1f;
+            if (ambientEffect >= 0) ownAs.animation = ambientEffect;
+            if (palette >= 0) ownAs.palette = Math.min(palette, Palettes.count() - 1);
+            ownAs.color = ambientColor;
+            float[] c = ownAmbient.render(dt, ownAs, new int[]{ambientColor});
+            one[0] = c[0];
+            one[1] = c[1];
+            one[2] = c[2];
+            return one;
+        }
+
+        /**
+         * Where the head points. Music: cycles are tied to the tempo (Speed 0.5 = one per bar);
+         * just lights: slow, set by the speed slider.
+         */
+        void motion(Features f, float dt, boolean beat, boolean ambient, float ambSpeed) {
+            float mul = (float) Math.pow(2.0, (moveSpeed - 0.5) * 4.0); // ¼× … 4×
+            float bpm = f != null && f.bpm > 0 ? f.bpm : 120f;
+            float cps = ambient ? (0.02f + 0.2f * ambSpeed) * mul : bpm / 60f / 4f * mul;
+            phase += dt * cps;
+            double a = 2 * Math.PI * phase;
+            float m = move;
+            if (beat && !ambient) {
+                barBeats++;
+                if (strobeMode == 1 && f.beatStrength > 0.8f) strobeLeft = 0.18f;
+                if (gobo == 8 && barBeats % 4 == 0) goboSlot = 1 + (goboSlot % 7);
+            }
+            if (ambient && gobo == 8) {
+                ambientT += dt;
+                if (ambientT > 8.0 / Math.max(0.1, mul)) {
+                    ambientT = 0;
+                    goboSlot = 1 + (goboSlot % 7);
+                }
+            }
+            switch (m <= 0.001f ? MOVE_FIXED : movement) {
+                case MOVE_FIXED:
+                    panT = panCenter;
+                    tiltT = tiltCenter;
+                    glide = 0.3f;
+                    break;
+                case MOVE_SWING:
+                    if (ambient) {
+                        panT = clamp01(panCenter + 0.5f * m * (float) Math.sin(a));
+                        tiltT = clamp01(tiltCenter + 0.4f * m * (float) Math.sin(a * 1.7 + 0.6));
+                        glide = 0.3f;
+                    } else if (beat) {
+                        // to the other side of the aim point every beat: big, visible moves
+                        side = !side;
+                        float reach = 0.5f + 0.5f * rnd.nextFloat();
+                        panT = clamp01(panCenter + (side ? 1f : -1f) * reach * m * 0.5f);
+                        tiltT = clamp01(tiltCenter + (rnd.nextFloat() * 2f - 1f) * m * 0.4f);
+                        glide = 60f / bpm * 0.45f / Math.max(0.5f, Math.min(2f, mul));
+                    }
+                    break;
+                case MOVE_CIRCLE:
+                    panT = clamp01(panCenter + 0.5f * m * (float) Math.cos(a));
+                    tiltT = clamp01(tiltCenter + 0.4f * m * (float) Math.sin(a));
+                    glide = 0.06f;
+                    break;
+                case MOVE_EIGHT:
+                    panT = clamp01(panCenter + 0.5f * m * (float) Math.sin(a));
+                    tiltT = clamp01(tiltCenter + 0.4f * m * (float) Math.sin(2 * a));
+                    glide = 0.06f;
+                    break;
+                case MOVE_WANDER:
+                    wanderLeft -= dt;
+                    if (wanderLeft <= 0f) {
+                        panT = clamp01(panCenter + (rnd.nextFloat() * 2f - 1f) * m * 0.5f);
+                        tiltT = clamp01(tiltCenter + (rnd.nextFloat() * 2f - 1f) * m * 0.4f);
+                        wanderLeft = 1f / Math.max(0.05f, cps) * 0.5f;
+                        glide = wanderLeft * 0.45f;
+                    }
+                    break;
+                case MOVE_SWEEP: {
+                    float tri = (float) (2 * Math.abs(phase - Math.floor(phase + 0.5))) * 2f - 1f; // -1..1..-1
+                    panT = clamp01(panCenter + 0.5f * m * tri);
+                    tiltT = tiltCenter;
+                    glide = 0.06f;
+                    break;
+                }
+                case MOVE_NOD:
+                    if (ambient) {
+                        nod = (float) (0.5 + 0.5 * Math.sin(a * 2));
+                    } else {
+                        // down on the beat, hold for a moment, then swing back up before the next one
+                        if (beat) nod = 0f;
+                        nod += dt;
+                        float per = 60f / bpm;
+                        float down = Math.max(0.12f, per * 0.3f);
+                        nodLevel = nod < down ? 1f : (float) Math.exp(-(nod - down) / (per * 0.25f));
+                    }
+                    panT = clamp01(panCenter + 0.35f * m * (float) Math.sin(a * 0.25));
+                    tiltT = clamp01(tiltCenter - 0.4f * m * (ambient ? nod : nodLevel));
+                    glide = 0.05f;
+                    break;
+                case MOVE_MELODY:
+                    if (f != null && f.melody > 0 && f.melodyConf > 0.08f) {
+                        float pc = (f.melody / 12f) - (float) Math.floor(f.melody / 12f);
+                        float height = clamp01((f.melody - 55f) / 30f);
+                        panT = clamp01(panCenter + (pc - 0.5f) * m);
+                        tiltT = clamp01(tiltCenter + (height - 0.5f) * m * 0.8f);
+                    }
+                    glide = 0.15f;
+                    break;
+                default:
+                    break;
+            }
         }
 
         /** Writes the channels for color {@code rgb} (0..1, brightness included) into the universe. */
-        void write(byte[] dmx, float r, float g, float b, float dt, float glideTau, float lightsLevel) {
+        void write(byte[] dmx, float r, float g, float b, float dt, float lightsLevel) {
+            float glideTau = glide;
             int[] t = test;
             int[] ro = roles;
             if (t != null) {
@@ -189,7 +386,7 @@ public final class Dmx {
                     case TILT_FINE: v = (int) (clamp01(tilt) * 65535f) & 0xFF; break;
                     case PT_SPEED: v = 0; break; // fastest: the app glides the movement itself
                     case WHEEL: v = WHEEL_DMX[wheelSlot]; break;
-                    case GOBO: v = 0; break;
+                    case GOBO: v = gobo == 0 ? 0 : GOBO_DMX[gobo == 8 ? goboSlot : Math.min(7, gobo)]; break;
                     default: v = 0;
                 }
                 put(dmx, i, v);
@@ -271,19 +468,20 @@ public final class Dmx {
             LightSettings own = new LightSettings();
             own.copyFrom(s);
             own.maxBrightness = 1f;
-            float[] rgb = renderer.render(f, t, dt, own);
-            if (overlay != null) {
-                rgb = rgb.clone();
-                overlay.apply(rgb, rgb.length / 3);
-            }
+            float[] shared = renderer.render(f, t, dt, own);
             boolean beat = f != null && f.beatCount != lastBeat && lastBeat != Integer.MIN_VALUE;
             if (f != null) lastBeat = f.beatCount;
-            float period = f != null && f.bpm > 0 ? 60f / f.bpm : 0.5f;
+            float[] rgb = new float[3 * fixtures.size()];
+            for (int i = 0; i < fixtures.size(); i++) {
+                float[] c = fixtures.get(i).musicColor(shared, i, f, t, dt, own, beat);
+                System.arraycopy(c, 0, rgb, 3 * i, 3);
+            }
+            if (overlay != null) overlay.apply(rgb, fixtures.size());
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
             for (int i = 0; i < fixtures.size(); i++) {
                 Fixture fx = fixtures.get(i);
-                if (beat) fx.onBeat(f.beatStrength);
-                fx.write(universes.get(fx.key()), rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], dt, period * 0.45f, s.maxBrightness);
+                fx.motion(f, dt, beat, false, 0f);
+                fx.write(universes.get(fx.key()), rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], dt, s.maxBrightness);
             }
             lastRgb = rgb;
             return rgb;
@@ -300,12 +498,15 @@ public final class Dmx {
             Ambient.Settings own = new Ambient.Settings();
             own.copyFrom(s);
             own.brightness = 1f;
-            float[] rgb = ambient.render(dt, own, null);
+            float[] shared = ambient.render(dt, own, null);
+            float[] rgb = new float[3 * fixtures.size()];
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
             for (int i = 0; i < fixtures.size(); i++) {
                 Fixture fx = fixtures.get(i);
-                fx.drift(dt, s.speed);
-                fx.write(universes.get(fx.key()), rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], dt, 0.6f, s.brightness);
+                float[] c = fx.ambientColor(shared, i, dt, own);
+                System.arraycopy(c, 0, rgb, 3 * i, 3);
+                fx.motion(null, dt, false, true, s.speed);
+                fx.write(universes.get(fx.key()), c[0], c[1], c[2], dt, s.brightness);
             }
             lastRgb = rgb;
             return rgb;

@@ -38,7 +38,8 @@ public final class Shuffle {
     private float intensity = 0.6f, colorMove = 0.5f;
     private final List<int[]> stripPick = new ArrayList<>();   // effect, variant, strobe
     private final List<float[]> stripPickF = new ArrayList<>(); // blur, speed
-    private float dmxMove = 0.3f;
+    private float dmxMove = 0.3f, dmxMoveSpeed = 0.5f;
+    private int dmxMovement = Dmx.MOVE_SWING;
     private int dmxStrobe = 0;
     private int generation = 0;
     private String reason = "";
@@ -227,6 +228,12 @@ public final class Shuffle {
         colorMove = clamp01(0.25f + 0.6f * e + (rnd.nextFloat() - 0.5f) * 0.15f);
         palette = pickPalette(e);
         dmxMove = 0.2f + 0.7f * e;
+        // calm: slow flowing figures; energetic: beat-driven moves
+        int[] moves = e < 0.38f ? new int[]{Dmx.MOVE_WANDER, Dmx.MOVE_EIGHT, Dmx.MOVE_CIRCLE, Dmx.MOVE_MELODY}
+                : e > 0.68f ? new int[]{Dmx.MOVE_SWING, Dmx.MOVE_NOD, Dmx.MOVE_CIRCLE, Dmx.MOVE_SWEEP}
+                : new int[]{Dmx.MOVE_CIRCLE, Dmx.MOVE_SWEEP, Dmx.MOVE_SWING, Dmx.MOVE_EIGHT, Dmx.MOVE_MELODY};
+        dmxMovement = moves[rnd.nextInt(moves.length)];
+        dmxMoveSpeed = clamp01(0.3f + 0.45f * e + (rnd.nextFloat() - 0.5f) * 0.15f);
         dmxStrobe = e > 0.75f ? 1 : 0;
         stripPick.clear();
         stripPickF.clear();
@@ -302,6 +309,8 @@ public final class Shuffle {
 
     public void applyDmx(Dmx.Fixture f) {
         f.move = Dmx.moves(f.roles) ? dmxMove : f.move;
+        f.movement = dmxMovement;
+        f.moveSpeed = dmxMoveSpeed;
         f.strobeMode = dmxStrobe;
     }
 

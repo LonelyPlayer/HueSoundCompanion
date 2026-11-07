@@ -482,6 +482,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         boolean wasActive = SyncState.isActive();
         prefs.setAppMode(m);
         rebuildStrips();
+        rebuildDmx();
         refresh();
         if (wasActive) {
             SyncService.stop(this);
@@ -790,7 +791,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
             TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
             chev.setPadding(0, 0, Ui.dp(this, 10), 0);
             head.addView(chev);
-            TextView t = Ui.text(this, d.name + "\nUniverse " + d.universe + " · Ch " + d.address + "–" + d.lastChannel(), 15, Ui.TEXT, true);
+            String what = ambientMode() ? dmxAmbientName(d) : app.huebeat.core.Dmx.EFFECTS[d.effect];
+            TextView t = Ui.text(this, d.name + "\n" + what + " · Ch " + d.address + "–" + d.lastChannel(), 15, Ui.TEXT, true);
             t.setLineSpacing(0, 1.15f);
             head.addView(t, Ui.lp(0, Ui.WRAP, 1));
             TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
@@ -819,6 +821,63 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 chev.setText(o ? "▾" : "▸");
                 ui.edit().putBoolean(key, o).apply();
             });
+            final boolean amb = ambientMode();
+            final boolean colors = app.huebeat.core.Dmx.hasColor(d.roles);
+            if (amb) {
+                body.addView(Ui.label(this, "Animation"));
+                TextView animBtn = pickerButton(dmxAmbientName(d) + "  ▸");
+                animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
+                        d.ambientEffect + 1, k -> {
+                            d.ambientEffect = k - 1;
+                            prefs.saveDmx(dmxList);
+                            animBtn.setText(dmxAmbientName(d) + "  ▸");
+                        }));
+                body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+                if (colors) {
+                    TextView colBtn = pickerButton("Light color");
+                    setDot(colBtn, d.ambientColor);
+                    colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.ambientColor, c -> {
+                        d.ambientColor = c;
+                        prefs.saveDmx(dmxList);
+                        setDot(colBtn, c);
+                    }));
+                    body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+                }
+            } else {
+                body.addView(Ui.label(this, "Effect"));
+                LinearLayout colorBox = Ui.column(this);
+                TextView fxBtn = pickerButton(app.huebeat.core.Dmx.EFFECTS[d.effect] + "  ▸");
+                body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+                body.addView(colorBox);
+                Runnable showColor = () -> {
+                    colorBox.removeAllViews();
+                    boolean solid = d.effect == app.huebeat.core.Dmx.FX_SOLID || d.effect == app.huebeat.core.Dmx.FX_SOLID_PULSE;
+                    if (!solid || !colors) return;
+                    TextView colBtn = pickerButton("Light color");
+                    setDot(colBtn, d.color);
+                    colBtn.setOnClickListener(v -> Pickers.color(this, "Light color", d.color, c -> {
+                        d.color = c;
+                        prefs.saveDmx(dmxList);
+                        setDot(colBtn, c);
+                    }));
+                    colorBox.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+                };
+                fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", app.huebeat.core.Dmx.EFFECTS,
+                        app.huebeat.core.Dmx.EFFECT_CATEGORIES, d.effect, k -> {
+                            d.effect = k;
+                            prefs.saveDmx(dmxList);
+                            fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
+                            showColor.run();
+                        }));
+                showColor.run();
+            }
+            if (colors) {
+                body.addView(Ui.label(this, "Colors"));
+                body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> d.palette, v -> {
+                    d.palette = v;
+                    prefs.saveDmx(dmxList);
+                }));
+            }
             body.addView(Ui.label(this, "Brightness"));
             body.addView(Ui.slider(this, d.brightness, v -> {
                 d.brightness = Math.max(0.02f, v);
@@ -830,6 +889,21 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 prefs.saveDmx(dmxList);
             }));
             if (app.huebeat.core.Dmx.moves(d.roles)) {
+                body.addView(Ui.label(this, "Movement"));
+                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.MOVES, () -> d.movement, v -> {
+                    d.movement = v;
+                    prefs.saveDmx(dmxList);
+                }));
+                body.addView(Ui.label(this, "Movement size (0 = stays on the aim)"));
+                body.addView(Ui.slider(this, d.move, v -> {
+                    d.move = v;
+                    prefs.saveDmx(dmxList);
+                }));
+                body.addView(Ui.label(this, amb ? "Movement speed" : "Movement speed (middle = one cycle per bar)"));
+                body.addView(Ui.slider(this, d.moveSpeed, v -> {
+                    d.moveSpeed = v;
+                    prefs.saveDmx(dmxList);
+                }));
                 body.addView(Ui.label(this, "Aim: pan"));
                 body.addView(Ui.slider(this, d.panCenter, v -> {
                     d.panCenter = v;
@@ -840,9 +914,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
                     d.tiltCenter = v;
                     prefs.saveDmx(dmxList);
                 }));
-                body.addView(Ui.label(this, "Movement (0 = stays on the aim)"));
-                body.addView(Ui.slider(this, d.move, v -> {
-                    d.move = v;
+            }
+            if (app.huebeat.core.Dmx.hasGobo(d.roles)) {
+                body.addView(Ui.label(this, "Gobo"));
+                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.GOBOS, () -> d.gobo, v -> {
+                    d.gobo = v;
                     prefs.saveDmx(dmxList);
                 }));
             }
@@ -859,6 +935,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
         TextView add = Ui.button(this, "+ Add DMX light (Art-Net / sACN)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class), REQ_DMX));
         dmxBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
+    }
+
+    private String dmxAmbientName(DmxLight d) {
+        return d.ambientEffect < 0 ? "Same as lights" : Ambient.NAMES[Math.min(d.ambientEffect, Ambient.NAMES.length - 1)];
     }
 
     private String stripAmbientName(Strip st) {
@@ -984,6 +1064,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         List<Strip> list = prefs.strips();
         for (Strip st : list) if (st.palette >= 0) st.palette = shiftPalette(st.palette, d, -1);
         prefs.saveStrips(list);
+        List<DmxLight> dl = prefs.dmxLights();
+        for (DmxLight x : dl) if (x.palette >= 0) x.palette = shiftPalette(x.palette, d, -1);
+        prefs.saveDmx(dl);
     }
 
     private static int shiftPalette(int p, int deleted, int fallback) {
@@ -1255,6 +1338,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             editingPalette = -1;
             rebuildPalettes();
             rebuildAmbientPalettes();
+            rebuildDmx();
             rebuildStrips();
             refresh();
         }

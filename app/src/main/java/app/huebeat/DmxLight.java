@@ -20,6 +20,15 @@ final class DmxLight {
     boolean enabled = true;
     float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
     int strobeMode = 0;
+    // its own look (like the LED strips)
+    int effect = Dmx.FX_LIKE;
+    int palette = -1;           // -1 = same as the lights
+    int color = 0xFF2A6D;
+    int ambientEffect = -1;     // -1 = same as the lights
+    int ambientColor = 0xFF8A2A;
+    int movement = Dmx.MOVE_SWING;
+    float moveSpeed = 0.5f;
+    int gobo = 0;
 
     JSONObject toJson() throws JSONException {
         JSONArray r = new JSONArray();
@@ -28,7 +37,9 @@ final class DmxLight {
                 .put("address", address).put("preset", preset).put("roles", r).put("x", (double) x)
                 .put("brightness", (double) brightness).put("enabled", enabled)
                 .put("pan", (double) panCenter).put("tilt", (double) tiltCenter).put("move", (double) move)
-                .put("strobe", strobeMode);
+                .put("strobe", strobeMode).put("effect", effect).put("palette", palette).put("color", color)
+                .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor).put("movement", movement)
+                .put("moveSpeed", (double) moveSpeed).put("gobo", gobo);
     }
 
     static DmxLight fromJson(JSONObject o) {
@@ -53,6 +64,14 @@ final class DmxLight {
         d.tiltCenter = (float) o.optDouble("tilt", 0.5);
         d.move = (float) o.optDouble("move", 0.3);
         d.strobeMode = o.optInt("strobe", 0);
+        d.effect = Math.max(0, Math.min(Dmx.EFFECTS.length - 1, o.optInt("effect", Dmx.FX_LIKE)));
+        d.palette = o.optInt("palette", -1);
+        d.color = o.optInt("color", 0xFF2A6D);
+        d.ambientEffect = o.optInt("ambientEffect", -1);
+        d.ambientColor = o.optInt("ambientColor", 0xFF8A2A);
+        d.movement = Math.max(0, Math.min(Dmx.MOVES.length - 1, o.optInt("movement", Dmx.MOVE_SWING)));
+        d.moveSpeed = (float) o.optDouble("moveSpeed", 0.5);
+        d.gobo = Math.max(0, Math.min(Dmx.GOBOS.length - 1, o.optInt("gobo", 0)));
         return d;
     }
 
@@ -74,6 +93,14 @@ final class DmxLight {
         f.tiltCenter = tiltCenter;
         f.move = move;
         f.strobeMode = strobeMode;
+        f.effect = effect;
+        f.palette = palette;
+        f.color = color;
+        f.ambientEffect = ambientEffect;
+        f.ambientColor = ambientColor;
+        f.movement = movement;
+        f.moveSpeed = moveSpeed;
+        f.gobo = gobo;
     }
 
     int lastChannel() {
