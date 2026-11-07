@@ -156,9 +156,11 @@ public final class Prefs {
                 .putFloat("amb_bright", ambient.brightness).apply();
     }
 
+    /** A lamp's own color; rgb < 0 = none, the lamp uses the main color. */
     public void setLightColor(int channel, int rgb) {
         java.util.Map<Integer, Integer> m = new java.util.HashMap<>(lightColors);
-        m.put(channel, rgb);
+        if (rgb < 0) m.remove(channel);
+        else m.put(channel, rgb);
         lightColors = m;
         JSONObject o = new JSONObject();
         try {

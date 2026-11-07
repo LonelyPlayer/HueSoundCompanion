@@ -66,6 +66,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private LinearLayout musicTop, musicLook, ambientLook, lightsList, lampBox;
     private TextView ambAnimBtn, ambColorBtn;
     private String shownNames = null;
+    private final List<Runnable> lampRows = new ArrayList<>();
     private boolean fetchingNames = false;
 
     @Override
@@ -349,6 +350,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             a.color = c;
             prefs.saveAmbient();
             setDot(ambColorBtn, c);
+            for (Runnable r : lampRows) r.run();
         }));
         box.addView(ambColorBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
 
@@ -389,6 +391,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         if (names.equals(shownNames)) return;
         shownNames = names;
         lightsList.removeAllViews();
+        lampRows.clear();
         if (!prefs.isConfigured()) {
             lightsList.addView(Ui.text(this, "No Hue bridge connected.", 14, Ui.SUB, false));
             return;
@@ -409,15 +412,23 @@ public class MainActivity extends Activity implements SyncState.Listener {
             }
             String name = line.substring(eq + 1);
             TextView row = pickerButton(name);
-            Integer c0 = prefs.lightColors.get(channel);
-            setDot(row, c0 != null ? c0 : prefs.ambient.color);
+            Runnable show = () -> {
+                Integer c0 = prefs.lightColors.get(channel);
+                row.setText(c0 == null ? name + "  ·  main color" : name);
+                setDot(row, c0 != null ? c0 : prefs.ambient.color);
+            };
+            show.run();
             row.setOnClickListener(v -> {
                 Integer cur = prefs.lightColors.get(channel);
-                Pickers.color(this, name, cur != null ? cur : prefs.ambient.color, c -> {
+                Pickers.color(this, name, cur != null ? cur : -1, c -> {
                     prefs.setLightColor(channel, c);
-                    setDot(row, c);
-                });
+                    show.run();
+                }, () -> {
+                    prefs.setLightColor(channel, -1);
+                    show.run();
+                }, "Same as main color");
             });
+            lampRows.add(show);
             lightsList.addView(row, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
         }
     }

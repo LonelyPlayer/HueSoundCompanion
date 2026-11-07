@@ -41,6 +41,10 @@ final class Pickers {
 
     /** With {@code same}, the dialog offers "Same as lights" (and {@code initial} < 0 means that is chosen). */
     static void color(Activity a, String title, int initial, ColorSet set, Runnable same) {
+        color(a, title, initial, set, same, "Same as lights");
+    }
+
+    static void color(Activity a, String title, int initial, ColorSet set, Runnable same, String sameLabel) {
         final int start = initial;
         if (initial < 0) initial = 0xFF8A2A;
         float[] hsv = new float[3];
@@ -133,7 +137,7 @@ final class Pickers {
                 .setPositiveButton("Done", null)
                 .setNegativeButton("Cancel", (d, w) -> revert.run())
                 .setOnCancelListener(d -> revert.run());
-        if (same != null) bd.setNeutralButton("Same as lights", (d, w) -> same.run());
+        if (same != null) bd.setNeutralButton(sameLabel, (d, w) -> same.run());
         bd.show();
     }
 
