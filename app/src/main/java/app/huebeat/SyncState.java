@@ -32,6 +32,8 @@ public final class SyncState {
     public static volatile boolean reshuffle;
     /** The phone itself plays along (screen show + flashlight); the engine runs even without lights. */
     public static volatile boolean phoneShow;
+    /** A device that can't be reached right now (the sync runs on with the others). */
+    public static volatile String problem = "";
     /** The analysis the lights use right now (delayed like them), null in "Just lights". */
     public static volatile app.huebeat.core.Features features;
     /** The palette the lights use right now (Shuffle's pick included). */
@@ -43,7 +45,10 @@ public final class SyncState {
     public static void set(Status s, String msg) {
         status = s;
         message = msg == null ? "" : msg;
-        if (s != Status.RUNNING) hint = "";
+        if (s != Status.RUNNING) {
+            hint = "";
+            problem = "";
+        }
         notifyListeners();
     }
 

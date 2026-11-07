@@ -186,12 +186,10 @@ public class SyncService extends Service {
         Prefs prefs = Prefs.get(this);
         String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey();
         AudioRecord rec = null;
-        DtlsPskClient dtls = null;
         Thread audioThread = null;
         VisualizerSource viz = null;
         ScreenSource screen = null;
         String screenError = null;
-        boolean streamingStarted = false;
         DatagramSocket stripSock = null;
         app.huebeat.core.Shuffle shuffle = new app.huebeat.core.Shuffle();
         app.huebeat.core.Buildup buildup = new app.huebeat.core.Buildup();
@@ -200,16 +198,16 @@ public class SyncService extends Service {
         int lampBeat = 0, lampSnare = 0;
         boolean shuffled = false;
         Rig rig = new Rig();
-        String area = null;
-        boolean hue = false;
+        HueLink link = null;
         try {
             List<HueLamp> hueLamps = Rig.streamedLamps(prefs);
-            hue = !hueLamps.isEmpty();
-            SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
-            if (hue) area = hueSetup(prefs, hueLamps, rig);
+            boolean hue = !hueLamps.isEmpty();
+            SyncState.set(SyncState.Status.STARTING, "Starting…");
             rig.update(prefs);
-            if (rig.isEmpty() && !SyncState.phoneShow)
+            if (rig.isEmpty() && !hue && !SyncState.phoneShow)
                 throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
+            // the bridge connects on its own thread: an unreachable bridge doesn't hold up the rest
+            if (hue) link = new HueLink(prefs, hueLamps, SyncState::notifyListeners);
             stripSock = new DatagramSocket();
 
             rec = createRecorder(mode, mp, prefs);
@@ -227,13 +225,6 @@ public class SyncService extends Service {
             audioThread.setPriority(Thread.MAX_PRIORITY);
             audioThread.start();
 
-            if (hue) {
-                HueApi.setStreaming(ip, user, area, true);
-                streamingStarted = true;
-                dtls = connect(ip, user, key);
-            }
-
-            HueStream stream = hue ? new HueStream(area) : null;
             LightSettings ls = prefs.light;
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             boolean bt = isBluetoothOutput(am);
@@ -243,7 +234,6 @@ public class SyncService extends Service {
 
             long start = System.nanoTime(), last = start, nextFrame = start, lastCheck = start;
             long silentSince = start, captureSilentSince = start, captureLoudSince = 0, vizRetryAt = start;
-            int failures = 0;
             boolean useViz = false;
             String vizError = null;
             String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
@@ -260,6 +250,10 @@ public class SyncService extends Service {
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
 
+                // the bridge answered: its lamps join
+                HueApi.ChannelMap hueMap = link != null ? link.takeMap() : null;
+                if (hueMap != null) rig.setHue(hueLamps, hueMap);
+                SyncState.problem = link != null ? link.problem : "";
                 // settings changed in the app: taken over without restarting the sync
                 rig.update(prefs);
                 if (rig.scene != laid) {
@@ -449,19 +443,7 @@ public class SyncService extends Service {
                 lightC[3 * lightPos + 2] = mean[2];
                 lightPos = (lightPos + 1) % lightT.length;
                 rig.sendLocal(stripSock, stripRgb);
-                if (hue) try {
-                    dtls.send(stream.build(rig.channelIds, rgb));
-                    failures = 0;
-                } catch (IOException e) {
-                    if (!alive(gen)) break;
-                    if (++failures > 3) throw e;
-                    SyncState.set(SyncState.Status.STARTING, "Reconnecting…");
-                    try { dtls.close(); } catch (Exception ignored) { }
-                    Thread.sleep(500);
-                    HueApi.setStreaming(ip, user, area, true);
-                    dtls = connect(ip, user, key);
-                    SyncState.set(SyncState.Status.RUNNING, "");
-                }
+                if (link != null) link.send(rig.channelIds, rgb);
 
                 float[] m = rig.meanColor();
                 SyncState.r = m[0];
@@ -501,14 +483,6 @@ public class SyncService extends Service {
                 if (sleep > 0) Thread.sleep(sleep / 1_000_000L, (int) (sleep % 1_000_000L));
                 else nextFrame = System.nanoTime();
             }
-            if (dtls != null) dtls.close();
-            dtls = null;
-            if (streamingStarted) {
-                try {
-                    HueApi.setStreaming(ip, user, area, false);
-                } catch (IOException ignored) {
-                }
-            }
         } catch (InterruptedException ignored) {
             // stopping
         } catch (Exception e) {
@@ -520,7 +494,11 @@ public class SyncService extends Service {
             if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
             if (screen != null) screen.stop();
-            if (dtls != null) dtls.close();
+            SyncState.problem = "";
+            if (link != null) {
+                Thread.interrupted(); // stopping the stream must not be cut short
+                link.close();
+            }
             if (audioThread != null) {
                 try {
                     audioThread.join(500);
@@ -534,12 +512,6 @@ public class SyncService extends Service {
                 }
                 rec.release();
             }
-            if (streamingStarted && dtls != null) {
-                try {
-                    HueApi.setStreaming(ip, user, area, false);
-                } catch (Exception ignored) {
-                }
-            }
         }
     }
 
@@ -551,27 +523,18 @@ public class SyncService extends Service {
     private void runAmbient(int gen) {
         Prefs prefs = Prefs.get(this);
         String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey();
-        String area = null;
-        DtlsPskClient dtls = null;
         DatagramSocket stripSock = null;
-        boolean streamingStarted = false;
         Rig rig = new Rig();
-        boolean hue = false;
+        HueLink link = null;
         boolean finished = false;
         try {
             List<HueLamp> hueLamps = Rig.streamedLamps(prefs);
-            hue = !hueLamps.isEmpty();
-            SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
-            if (hue) area = hueSetup(prefs, hueLamps, rig);
+            boolean hue = !hueLamps.isEmpty();
+            SyncState.set(SyncState.Status.STARTING, "Starting…");
             rig.update(prefs);
-            if (rig.isEmpty() && !SyncState.phoneShow) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
+            if (rig.isEmpty() && !hue && !SyncState.phoneShow) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
             stripSock = new DatagramSocket();
-            if (hue) {
-                HueApi.setStreaming(ip, user, area, true);
-                streamingStarted = true;
-                dtls = connect(ip, user, key);
-            }
-            HueStream stream = hue ? new HueStream(area) : null;
+            if (hue) link = new HueLink(prefs, hueLamps, SyncState::notifyListeners);
             Ambient.Settings as = prefs.ambient;
             SyncState.meter = 0f;
             SyncState.bpm = 0f;
@@ -580,11 +543,13 @@ public class SyncService extends Service {
             notifyAmbient(prefs);
 
             long last = System.nanoTime(), nextFrame = last;
-            int failures = 0;
             while (alive(gen)) {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
+                HueApi.ChannelMap hueMap = link != null ? link.takeMap() : null;
+                if (hueMap != null) rig.setHue(hueLamps, hueMap);
+                SyncState.problem = link != null ? link.problem : "";
                 rig.update(prefs);
                 SyncState.features = null;
                 SyncState.palette = as.palette;
@@ -594,19 +559,7 @@ public class SyncService extends Service {
                 float[][] stripRgb = new float[rig.strips.size()][];
                 for (int k = 0; k < rig.strips.size(); k++) stripRgb[k] = rig.strips.get(k).renderAmbient(dt, as);
                 rig.sendLocal(stripSock, stripRgb);
-                if (hue) try {
-                    dtls.send(stream.build(rig.channelIds, rig.hueColors()));
-                    failures = 0;
-                } catch (IOException e) {
-                    if (!alive(gen)) break;
-                    if (++failures > 3) throw e;
-                    SyncState.set(SyncState.Status.STARTING, "Reconnecting…");
-                    try { dtls.close(); } catch (Exception ignored) { }
-                    Thread.sleep(500);
-                    HueApi.setStreaming(ip, user, area, true);
-                    dtls = connect(ip, user, key);
-                    SyncState.set(SyncState.Status.RUNNING, "");
-                }
+                if (link != null) link.send(rig.channelIds, rig.hueColors());
                 float[] m = rig.meanColor();
                 SyncState.r = m[0];
                 SyncState.g = m[1];
@@ -626,58 +579,13 @@ public class SyncService extends Service {
         } finally {
             if (gen == generation) running = false;
             Thread.interrupted(); // the network calls below must not be cut short
-            if (dtls != null) dtls.close();
-            if (streamingStarted) {
-                try {
-                    HueApi.setStreaming(ip, user, area, false);
-                } catch (Exception ignored) {
-                }
-            }
+            SyncState.problem = "";
+            if (link != null) link.close();
             if (finished && prefs.keepColors()) keepColors(ip, user, rig);
             else rig.blackoutDmx(stripSock); // DMX nodes hold the last frame: that already keeps the colors
             if (stripSock != null) stripSock.close();
             Ambient.master = null;
         }
-    }
-
-    /**
-     * Puts the streamed Hue lamps into the app's own entertainment configuration on the bridge
-     * (created or updated when the set of lamps changed) and wires its channels. Returns its id.
-     */
-    private static String hueSetup(Prefs prefs, List<HueLamp> lamps, Rig rig) throws IOException {
-        String ip = prefs.bridgeIp(), user = prefs.username();
-        String id = prefs.hueConfigId();
-        StringBuilder want = new StringBuilder();
-        for (HueLamp h : lamps) want.append(h.entService).append(',');
-        if (id == null || !want.toString().equals(prefs.hueConfigKey())) {
-            if (id != null) {
-                try {
-                    HueApi.setStreaming(ip, user, id, false);
-                } catch (IOException ignored) {
-                }
-            }
-            List<HueApi.Placed> placed = new ArrayList<>();
-            for (HueLamp h : lamps) {
-                HueApi.Placed p = new HueApi.Placed();
-                p.entService = h.entService;
-                p.positions = h.gradient() ? new float[][]{{h.x, h.y, h.z}, {h.x2, h.y2, h.z}} : new float[][]{{h.x, h.y, h.z}};
-                placed.add(p);
-            }
-            id = HueApi.ensureConfig(ip, user, id, placed);
-            prefs.setHueConfigId(id);
-            prefs.setHueConfigKey(want.toString());
-        }
-        HueApi.ChannelMap map;
-        try {
-            map = HueApi.channelMap(ip, user, id);
-        } catch (IOException e) {
-            // removed on the bridge in the meantime: make it again
-            prefs.setHueConfigKey("");
-            prefs.setHueConfigId(null);
-            return hueSetup(prefs, lamps, rig);
-        }
-        rig.setHue(lamps, map);
-        return id;
     }
 
     /** Camera layout: where each room point sits in the camera picture, plus the output buffer. */
@@ -714,21 +622,6 @@ public class SyncService extends Service {
     private void notifyAmbient(Prefs prefs) {
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.notify(NOTIFICATION_ID, buildNotification("Lighting " + targetsText(prefs)));
-    }
-
-    private static DtlsPskClient connect(String ip, String user, String key) throws IOException {
-        IOException last = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            DtlsPskClient c = new DtlsPskClient(InetAddress.getByName(ip), 2100, user, DtlsPskClient.hex(key));
-            try {
-                c.handshake(6000);
-                return c;
-            } catch (IOException e) {
-                c.close();
-                last = e;
-            }
-        }
-        throw last;
     }
 
     @SuppressLint("MissingPermission")

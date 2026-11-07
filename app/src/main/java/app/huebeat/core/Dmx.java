@@ -401,6 +401,7 @@ public final class Dmx {
         private final Map<String, byte[]> universes = new LinkedHashMap<>();
         private final Map<String, Fixture> firstOf = new LinkedHashMap<>();
         private final Map<String, InetAddress> hosts = new LinkedHashMap<>();
+        private final Map<String, Long> unresolved = new java.util.HashMap<>();
 
         private int seq = 1;
         private final byte[] cid = new byte[16];
@@ -464,7 +465,18 @@ public final class Dmx {
                 Fixture f = firstOf.get(e.getKey());
                 try {
                     InetAddress a = hosts.get(f.ip);
-                    if (a == null) hosts.put(f.ip, a = InetAddress.getByName(f.ip));
+                    if (a == null) {
+                        // a name that doesn't resolve: try again in a while, not every frame
+                        Long until = unresolved.get(f.ip);
+                        if (until != null && System.currentTimeMillis() < until) continue;
+                        try {
+                            a = InetAddress.getByName(f.ip);
+                        } catch (IOException ex) {
+                            unresolved.put(f.ip, System.currentTimeMillis() + 10_000);
+                            throw ex;
+                        }
+                        hosts.put(f.ip, a);
+                    }
                     byte[] p = f.protocol == 1 ? ArtNet.sacn(f.universe, s, e.getValue(), cid)
                             : ArtNet.dmx(f.universe, s, e.getValue(), 512);
                     sock.send(new DatagramPacket(p, p.length, a, f.protocol == 1 ? 5568 : ArtNet.PORT));

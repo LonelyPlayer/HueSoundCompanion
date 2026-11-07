@@ -1805,7 +1805,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
                     else if (prefs.mode() != Prefs.MODE_MIC && SyncState.visualizer) st += " · no chords via visualizer";
                 }
                 status.setText(st);
-                hint.setText(SyncState.hint);
+                String pr = SyncState.problem;
+                hint.setText(pr.isEmpty() ? SyncState.hint : SyncState.hint.isEmpty() ? pr : pr + "\n" + SyncState.hint);
                 break;
             case STARTING:
                 status.setTextColor(Ui.ACCENT);
