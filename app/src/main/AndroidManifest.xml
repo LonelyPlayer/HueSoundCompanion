@@ -64,6 +64,10 @@
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".AppPickerActivity" android:exported="false" />
         <activity
+            android:name=".PhoneShowActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+        <activity
             android:name=".StripSetupActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />

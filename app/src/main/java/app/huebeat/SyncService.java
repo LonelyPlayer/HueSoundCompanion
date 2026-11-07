@@ -208,7 +208,7 @@ public class SyncService extends Service {
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
             if (hue) area = hueSetup(prefs, hueLamps, rig);
             rig.update(prefs);
-            if (rig.isEmpty())
+            if (rig.isEmpty() && !SyncState.phoneShow)
                 throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
             stripSock = new DatagramSocket();
 
@@ -401,6 +401,8 @@ public class SyncService extends Service {
                 boolean showBuild = ls.buildups && !calibrating;
                 shuffle.building = showBuild ? buildup.level() : 0f;
                 rig.dmx.overlay = showBuild ? buildup : null;
+                SyncState.features = f;
+                SyncState.palette = use.palette;
                 rig.music(f, tSec, dt, use, calibrating ? calColor : null);
                 float[] rgb = rig.hueColors();
                 if (showBuild) {
@@ -562,7 +564,7 @@ public class SyncService extends Service {
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
             if (hue) area = hueSetup(prefs, hueLamps, rig);
             rig.update(prefs);
-            if (rig.isEmpty()) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
+            if (rig.isEmpty() && !SyncState.phoneShow) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
             stripSock = new DatagramSocket();
             if (hue) {
                 HueApi.setStreaming(ip, user, area, true);
@@ -584,6 +586,8 @@ public class SyncService extends Service {
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
                 rig.update(prefs);
+                SyncState.features = null;
+                SyncState.palette = as.palette;
                 rig.ambient(dt, as);
                 rig.dmx.overlay = null;
                 rig.dmx.write(rig.dmxColors(), null, dt, true, as.speed, as.brightness);

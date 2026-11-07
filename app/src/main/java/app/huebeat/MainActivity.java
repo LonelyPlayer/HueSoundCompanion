@@ -59,6 +59,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private final List<TextView> styleChips = new ArrayList<>();
     private final List<TextView> paletteChips = new ArrayList<>();
     private boolean pendingStart = false;
+    private boolean pendingShow = false;
     private boolean askedNotif = false;
     /** Palette editor bookkeeping: which palette is edited (-1 = new) and where the result goes. */
     private int editingPalette = -1;
@@ -108,6 +109,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
         LinearLayout header = Ui.row(this);
         TextView title = Ui.text(this, "LightBox", 22, Ui.TEXT, true);
         header.addView(title, Ui.lp(0, Ui.WRAP, 1));
+        TextView show = Ui.text(this, "✦ Phone show", 14, Ui.SUB, true);
+        show.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 12), Ui.dp(this, 8));
+        Ui.clickable(show, Ui.CARD_2, Ui.dp(this, 16));
+        show.setContentDescription("Phone show: screen and flashlight play along");
+        show.setOnClickListener(v -> phoneShow());
+        header.addView(show);
         root.addView(header, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, Ui.dp(this, 18)));
 
         // what the app does: follow music, or just light the room
@@ -1739,7 +1746,27 @@ public class MainActivity extends Activity implements SyncState.Listener {
         return d;
     }
 
+    /** The phone plays along: starts listening if needed, then opens the full-screen show. */
+    private void phoneShow() {
+        SyncState.phoneShow = true;
+        if (SyncState.status == SyncState.Status.RUNNING) {
+            startActivity(new Intent(this, PhoneShowActivity.class));
+            return;
+        }
+        pendingShow = true;
+        if (!SyncState.isActive()) startFlow();
+    }
+
     private void refresh() {
+        if (pendingShow) {
+            if (SyncState.status == SyncState.Status.RUNNING) {
+                pendingShow = false;
+                startActivity(new Intent(this, PhoneShowActivity.class));
+            } else if (SyncState.status == SyncState.Status.ERROR) {
+                pendingShow = false;
+                SyncState.phoneShow = false;
+            }
+        }
         int mode = prefs.mode();
         boolean amb = ambientMode();
         for (int i = 0; i < appModeChips.size(); i++) Ui.setChipSelected(appModeChips.get(i), i == prefs.appMode());
@@ -1858,7 +1885,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     }
 
     private void startFlow() {
-        if (!prefs.hasOutputs()) {
+        if (!prefs.hasOutputs() && !SyncState.phoneShow) {
             // nothing to light yet: Hue is the usual start; with other lights set up, one has to be on
             if (prefs.hueLamps().isEmpty() && prefs.strips().isEmpty() && prefs.dmxLights().isEmpty()) addDeviceDialog();
             else android.widget.Toast.makeText(this, "Switch on at least one light below", android.widget.Toast.LENGTH_LONG).show();
@@ -1951,7 +1978,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_PROJECTION) {
             if (resultCode == RESULT_OK && data != null) launchService(resultCode, data);
-            else SyncState.set(SyncState.Status.OFF, "");
+            else {
+                SyncState.set(SyncState.Status.OFF, "");
+                pendingShow = false;
+                SyncState.phoneShow = false;
+            }
         } else if (requestCode == REQ_PICK_APP) {
             refresh();
             if (pendingStart && resultCode == RESULT_OK) startFlow();

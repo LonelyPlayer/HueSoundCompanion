@@ -289,6 +289,7 @@ final class Rig {
 
     /** Music frame (calColor != null: every light shows that color, for the camera calibration). */
     void music(Features f, double t, float dt, LightSettings use, float[] calColor) {
+        if (isEmpty() || scene == null) return; // only the phone plays along
         boolean beat = f != null && f.beatCount != lastBeat && lastBeat != Integer.MIN_VALUE;
         if (f != null) lastBeat = f.beatCount;
         frameCache.clear();
@@ -330,6 +331,7 @@ final class Rig {
 
     /** Just-lights frame. */
     void ambient(float dt, Ambient.Settings as) {
+        if (isEmpty() || scene == null) return;
         frameCache.clear();
         // devices with their own static color paint the room around them
         List<float[]> field = new ArrayList<>();
@@ -426,7 +428,7 @@ final class Rig {
 
     /** Average color of the whole room (for the app's button). */
     float[] meanColor() {
-        return scene != null ? scene.meanColor() : new float[3];
+        return scene != null && !isEmpty() ? scene.meanColor() : new float[3];
     }
 
     /** Per lamp: its average color in the last frame (to keep colors after stopping). */

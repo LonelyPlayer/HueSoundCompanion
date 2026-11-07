@@ -30,6 +30,12 @@ public final class SyncState {
     /** Shuffle: the look playing now ("Chords · Synthwave"), and a request for a new one. */
     public static volatile String shuffle = "";
     public static volatile boolean reshuffle;
+    /** The phone itself plays along (screen show + flashlight); the engine runs even without lights. */
+    public static volatile boolean phoneShow;
+    /** The analysis the lights use right now (delayed like them), null in "Just lights". */
+    public static volatile app.huebeat.core.Features features;
+    /** The palette the lights use right now (Shuffle's pick included). */
+    public static volatile int palette;
 
     private SyncState() {
     }
