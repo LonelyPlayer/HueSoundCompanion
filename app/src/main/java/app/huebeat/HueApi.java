@@ -357,6 +357,33 @@ public final class HueApi {
         request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, body, true);
     }
 
+    /** Switches a Hue light on or off through the normal API. */
+    public static void setLightOn(String ip, String appKey, String lightId, boolean on) throws IOException {
+        request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, "{\"on\":{\"on\":" + on + "}}", true);
+    }
+
+    /**
+     * Turns off the lamps of {@code oldArea} that aren't part of {@code newArea}
+     * (lamps in neither area stay as they are). Returns how many were switched off.
+     */
+    public static int turnOffLeftovers(String ip, String appKey, String oldArea, String newArea) throws IOException {
+        java.util.Set<String> keep = new java.util.HashSet<>();
+        for (ChannelLight cl : channelLights(ip, appKey, newArea)) if (cl.lightId != null) keep.add(cl.lightId);
+        java.util.Set<String> off = new java.util.LinkedHashSet<>();
+        for (ChannelLight cl : channelLights(ip, appKey, oldArea)) {
+            if (cl.lightId != null && !keep.contains(cl.lightId)) off.add(cl.lightId);
+        }
+        int n = 0;
+        for (String id : off) {
+            try {
+                setLightOn(ip, appKey, id, false);
+                n++;
+            } catch (IOException ignored) {
+            }
+        }
+        return n;
+    }
+
     private static float lin(float c) {
         return c > 0.04045f ? (float) Math.pow((c + 0.055f) / 1.055f, 2.4f) : c / 12.92f;
     }

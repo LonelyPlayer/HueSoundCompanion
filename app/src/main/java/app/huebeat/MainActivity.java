@@ -423,6 +423,27 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }, "lamp-names").start();
     }
 
+    /**
+     * A different entertainment area was chosen: lamps of the old area that aren't in the new one
+     * go off. A running sync is stopped first (lamps can't be switched while they stream), then
+     * restarted on the new area.
+     */
+    private void onAreaChanged(String oldArea) {
+        final boolean wasActive = SyncState.isActive();
+        if (wasActive) SyncService.stop(this);
+        final String ip = prefs.bridgeIp(), user = prefs.username(), newArea = prefs.areaId();
+        new Thread(() -> {
+            try {
+                if (wasActive) Thread.sleep(1500); // let the old stream end
+                HueApi.turnOffLeftovers(ip, user, oldArea, newArea);
+            } catch (Exception ignored) {
+            }
+            main.post(() -> {
+                if (wasActive && !isFinishing()) startFlow();
+            });
+        }, "area-change").start();
+    }
+
     private void onAppModeSelected(int m) {
         if (m == prefs.appMode()) return;
         boolean wasActive = SyncState.isActive();
@@ -996,6 +1017,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             if (pendingStart && resultCode == RESULT_OK) startFlow();
             pendingStart = false;
         } else if (requestCode == REQ_SETUP) {
+            String oldArea = data != null ? data.getStringExtra(SetupActivity.EXTRA_OLD_AREA) : null;
+            if (resultCode == RESULT_OK && oldArea != null) onAreaChanged(oldArea);
+            shownNames = null;
             refresh();
         } else if (requestCode == REQ_STRIP) {
             rebuildStrips();

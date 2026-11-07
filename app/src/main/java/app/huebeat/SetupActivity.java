@@ -34,6 +34,8 @@ public class SetupActivity extends Activity {
     private LinearLayout content;
     private volatile boolean alive = true;
     private int step = 0; // 1 find, 2 link, 3 area
+    /** Result extra: the entertainment area that was used before (only when it changed). */
+    static final String EXTRA_OLD_AREA = "oldArea";
 
     // discovery
     private NsdManager nsd;
@@ -362,8 +364,14 @@ public class SetupActivity extends Activity {
                                 + (a.id.equals(prefs.areaId()) ? " · current" : "");
                         TextView c = card(a.name, detail);
                         c.setOnClickListener(v -> {
+                            String old = prefs.areaId();
                             prefs.saveArea(a.id, a.name);
-                            setResult(RESULT_OK);
+                            Intent res = new Intent();
+                            if (old != null && !old.equals(a.id)) {
+                                res.putExtra(EXTRA_OLD_AREA, old);
+                                prefs.setChannelNames(""); // lamp list belongs to the old area
+                            }
+                            setResult(RESULT_OK, res);
                             finish();
                         });
                         list.addView(c);
