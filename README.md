@@ -29,6 +29,10 @@ Music sync for Philips Hue and LED strips that listens to **everything your phon
   - a palette spread over the room, a single color, or one of the animations: Gradient, Fade, Rainbow, Random Flash, Pixels (from LedFx), and new ones: **Candles** (independent flickering per lamp), **Fireplace**, Breathing, Aurora, Ocean, Thunderstorm, Starry night, Color loop, Lava and Party,
   - speed and brightness; each strip can follow the lamps' animation or run its own, in its own color and palette,
   - **Keep the colors when turned off:** when you stop, the last colors are written to the lamps (normal Hue API) and to WLED strips, so the light stays as it is.
+- **DMX lights via Art-Net / sACN** (e.g. Showtec NET-2/3 Pocket): the app finds Art-Net nodes (ArtPoll), shows their ports and universes, can set the universes remotely (ArtAddress, if the node accepts it) or open the node's settings page. DMX lights follow the same styles, palettes and Just-lights animations as the lamps.
+  - Presets: Eurolite LED PARty TCL Spot (5 ch), Fun Generation PicoSpot 20 LED (11/9/5 ch: pan/tilt movement on beats, color wheel follows the colors, strobe), UKing UV 36 LED 72 W (7 ch, unverified layout), plus generic RGB / RGBW / Dimmer+RGB / Dimmer / UV and custom channel layouts.
+  - **Channel tester** with a slider per channel, to check or work out a fixture's channels.
+  - A new node usually sits at 2.0.0.1: give it an address in your home network first.
 - **Light delay** slider, remembered separately for the phone speaker and Bluetooth (Bluetooth audio usually arrives 150–300 ms late).
 
 ## Install on your phone (no PC needed)
@@ -76,6 +80,8 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 | `core/LedFx.java` | Java ports of the LedFx 2.2.1 1D audio effects (GPL-3.0) |
 | `core/StripEffect.java` | Effect registry: the app's own strip effects plus the LedFx ports, strobe overlay |
 | `core/Ambient.java` | Just-lights animations (palette, candles, fireplace, aurora, …) |
+| `core/ArtNet.java` | Art-Net packets (ArtDmx, ArtPoll/Reply, ArtAddress) and sACN DMX |
+| `core/Dmx.java` | DMX fixtures: channel roles, presets, color/dimmer/strobe/pan-tilt/color wheel |
 | `core/StripOutput.java` | Renders effects on strip segments, interpolates to every LED, gamma, sends |
 | `StripSetupActivity.java` | WLED discovery (mDNS + /json/info) and strip settings |
 | `SyncService.java` | Foreground service: audio capture → analysis → 50 packets/s to the bridge |

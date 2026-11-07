@@ -38,7 +38,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_SETUP = 4;
     private static final int REQ_EDIT_PALETTE = 5;
     private static final int REQ_STRIP = 6;
-    private LinearLayout stripsBox;
+    private LinearLayout stripsBox, dmxBox;
+    private List<DmxLight> dmxList;
+    private static final int REQ_DMX = 9;
     private LinearLayout palettesRow;
     private TextView screenChip;
     private boolean sessionHasScreen = false;
@@ -239,6 +241,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
         stripsBox = Ui.column(this);
         stripsSection.addView(stripsBox);
         rebuildStrips();
+
+        LinearLayout dmxSection = collapsible(root, "DMX lights", "open_dmx", true);
+        dmxBox = Ui.column(this);
+        dmxSection.addView(dmxBox);
+        rebuildDmx();
 
         delayLabel = section("Light delay");
         root.addView(delayLabel);
@@ -739,6 +746,97 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }, "strip-switch").start();
     }
 
+    // ------------------------------------------------------------------ DMX lights
+
+    private void rebuildDmx() {
+        if (dmxBox == null) return;
+        dmxBox.removeAllViews();
+        dmxList = prefs.dmxLights();
+        android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        for (int i = 0; i < dmxList.size(); i++) {
+            final int idx = i;
+            final DmxLight d = dmxList.get(i);
+            LinearLayout card = Ui.column(this);
+            card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
+            card.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10));
+
+            LinearLayout head = Ui.row(this);
+            final String key = "open_dmx_" + d.ip + "_" + d.address + "_" + idx;
+            boolean open = ui.getBoolean(key, false);
+            TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
+            chev.setPadding(0, 0, Ui.dp(this, 10), 0);
+            head.addView(chev);
+            TextView t = Ui.text(this, d.name + "\nUniverse " + d.universe + " · Ch " + d.address + "–" + d.lastChannel(), 15, Ui.TEXT, true);
+            t.setLineSpacing(0, 1.15f);
+            head.addView(t, Ui.lp(0, Ui.WRAP, 1));
+            TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
+            gear.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
+            gear.setContentDescription("Light settings");
+            gear.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class)
+                    .putExtra(DmxSetupActivity.EXTRA_INDEX, idx), REQ_DMX));
+            head.addView(gear);
+            Switch on = new Switch(this);
+            on.setChecked(d.enabled);
+            on.setOnCheckedChangeListener((bv, checked) -> {
+                d.enabled = checked;
+                prefs.saveDmx(dmxList);
+                refresh();
+            });
+            head.addView(on);
+            card.addView(head);
+
+            LinearLayout body = Ui.column(this);
+            body.setPadding(0, 0, Ui.dp(this, 6), Ui.dp(this, 4));
+            body.setVisibility(open ? View.VISIBLE : View.GONE);
+            head.setClickable(true);
+            head.setOnClickListener(v -> {
+                boolean o = body.getVisibility() != View.VISIBLE;
+                body.setVisibility(o ? View.VISIBLE : View.GONE);
+                chev.setText(o ? "▾" : "▸");
+                ui.edit().putBoolean(key, o).apply();
+            });
+            body.addView(Ui.label(this, "Brightness"));
+            body.addView(Ui.slider(this, d.brightness, v -> {
+                d.brightness = Math.max(0.02f, v);
+                prefs.saveDmx(dmxList);
+            }));
+            body.addView(Ui.label(this, "Place in the room (left … right)"));
+            body.addView(Ui.slider(this, (d.x + 1f) / 2f, v -> {
+                d.x = v * 2f - 1f;
+                prefs.saveDmx(dmxList);
+            }));
+            if (app.huebeat.core.Dmx.moves(d.roles)) {
+                body.addView(Ui.label(this, "Aim: pan"));
+                body.addView(Ui.slider(this, d.panCenter, v -> {
+                    d.panCenter = v;
+                    prefs.saveDmx(dmxList);
+                }));
+                body.addView(Ui.label(this, "Aim: tilt"));
+                body.addView(Ui.slider(this, d.tiltCenter, v -> {
+                    d.tiltCenter = v;
+                    prefs.saveDmx(dmxList);
+                }));
+                body.addView(Ui.label(this, "Movement (0 = stays on the aim)"));
+                body.addView(Ui.slider(this, d.move, v -> {
+                    d.move = v;
+                    prefs.saveDmx(dmxList);
+                }));
+            }
+            if (app.huebeat.core.Dmx.hasStrobe(d.roles)) {
+                body.addView(Ui.label(this, "Built-in strobe"));
+                body.addView(Ui.chipRow(this, new String[]{"Off", "On strong beats"}, () -> d.strobeMode, v -> {
+                    d.strobeMode = v;
+                    prefs.saveDmx(dmxList);
+                }));
+            }
+            card.addView(body);
+            dmxBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
+        }
+        TextView add = Ui.button(this, "+ Add DMX light (Art-Net / sACN)", false);
+        add.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class), REQ_DMX));
+        dmxBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
+    }
+
     private String stripAmbientName(Strip st) {
         return st.ambientEffect < 0 ? "Same as lights" : Ambient.NAMES[Math.min(st.ambientEffect, Ambient.NAMES.length - 1)];
     }
@@ -1109,6 +1207,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             String oldArea = data != null ? data.getStringExtra(SetupActivity.EXTRA_OLD_AREA) : null;
             if (resultCode == RESULT_OK && oldArea != null) onAreaChanged(oldArea);
             shownNames = null;
+            refresh();
+        } else if (requestCode == REQ_DMX) {
+            rebuildDmx();
             refresh();
         } else if (requestCode == REQ_STRIP) {
             rebuildStrips();

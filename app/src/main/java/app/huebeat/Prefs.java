@@ -221,6 +221,41 @@ public final class Prefs {
         stripsVersion++;
     }
 
+    // ------------------------------------------------------------------ DMX lights
+
+    public java.util.List<DmxLight> dmxLights() {
+        java.util.List<DmxLight> l = new java.util.ArrayList<>();
+        try {
+            String json = dmxCache != null ? dmxCache : sp.getString("dmx", "[]");
+            JSONArray a = new JSONArray(json);
+            for (int i = 0; i < a.length(); i++) l.add(DmxLight.fromJson(a.getJSONObject(i)));
+        } catch (JSONException ignored) {
+        }
+        return l;
+    }
+
+    /** Bumped on every change to the DMX lights (applied live by the engine). */
+    public static volatile int dmxVersion = 0;
+    private volatile String dmxCache;
+    /** Set while the DMX channel tester runs (the show then pauses its DMX output). */
+    public static volatile String testLight;
+
+    public void saveDmx(java.util.List<DmxLight> l) {
+        JSONArray a = new JSONArray();
+        try {
+            for (DmxLight d : l) a.put(d.toJson());
+        } catch (JSONException ignored) {
+        }
+        sp.edit().putString("dmx", a.toString()).apply();
+        dmxCache = a.toString();
+        dmxVersion++;
+    }
+
+    public boolean hasEnabledDmx() {
+        for (DmxLight d : dmxLights()) if (d.enabled && !d.ip.isEmpty()) return true;
+        return false;
+    }
+
     public boolean hasEnabledStrips() {
         for (Strip s : strips()) if (s.enabled) return true;
         return false;
@@ -228,7 +263,7 @@ public final class Prefs {
 
     /** Something to send light to: a Hue bridge and/or an enabled LED strip. */
     public boolean hasOutputs() {
-        return isConfigured() || hasEnabledStrips();
+        return isConfigured() || hasEnabledStrips() || hasEnabledDmx();
     }
 
     // audio source

@@ -43,6 +43,7 @@ import app.huebeat.core.HueStream;
 import app.huebeat.core.LightSettings;
 import app.huebeat.core.Renderer;
 import app.huebeat.core.StripOutput;
+import app.huebeat.core.Dmx;
 
 /** Foreground service: captures audio, analyses it and streams colors to the Hue bridge. */
 public class SyncService extends Service {
@@ -192,6 +193,7 @@ public class SyncService extends Service {
         String screenError = null;
         boolean streamingStarted = false;
         DatagramSocket stripSock = null;
+        DmxRun dmxRun = new DmxRun();
         boolean hue = prefs.isConfigured();
         try {
             int seenStrips = Prefs.stripsVersion;
@@ -202,7 +204,9 @@ public class SyncService extends Service {
                 strips.add(st.output());
                 stripKeys.add(st.layoutKey());
             }
-            if (!hue && strips.isEmpty()) throw new IOException("Connect a Hue bridge or add an LED strip first.");
+            dmxRun.update(prefs);
+            if (!hue && strips.isEmpty() && dmxRun.out.isEmpty())
+                throw new IOException("Connect a Hue bridge or add an LED strip or DMX light first.");
             stripSock = new DatagramSocket();
 
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
@@ -393,6 +397,8 @@ public class SyncService extends Service {
                 Features f = active.at(now - ls.delayMs * 1_000_000L);
                 double tSec = (now - start) / 1e9;
                 if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, ls);
+                dmxRun.update(prefs);
+                if (!calibrating) dmxRun.out.render(f, tSec, dt, ls);
                 float[][] stripRgb = new float[strips.size()][];
                 for (int k = 0; k < strips.size(); k++) {
                     stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, ls);
@@ -425,6 +431,7 @@ public class SyncService extends Service {
                         // a strip that's switched off or out of Wi-Fi range shouldn't stop the rest
                     }
                 }
+                dmxRun.send(stripSock);
                 if (hue) try {
                     dtls.send(stream.build(ch.ids, rgb));
                     failures = 0;
@@ -492,6 +499,7 @@ public class SyncService extends Service {
             if (alive(gen)) main.post(() -> shutdown(msg));
         } finally {
             if (gen == generation) running = false;
+            dmxRun.blackout(stripSock);
             if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
             if (screen != null) screen.stop();
@@ -518,6 +526,51 @@ public class SyncService extends Service {
         }
     }
 
+    /** The DMX lights of a running sync, kept in step with the settings. */
+    private static final class DmxRun {
+        Dmx.Output out = new Dmx.Output(Dmx.none());
+        List<String> keys = new ArrayList<>();
+        int seen = Integer.MIN_VALUE;
+
+        void update(Prefs prefs) {
+            int v = Prefs.dmxVersion;
+            if (v != seen) {
+                seen = v;
+                List<DmxLight> cfg = new ArrayList<>();
+                for (DmxLight d : prefs.dmxLights()) if (d.enabled && !d.ip.isEmpty()) cfg.add(d);
+                boolean same = cfg.size() == keys.size();
+                for (int k = 0; same && k < cfg.size(); k++) same = cfg.get(k).layoutKey().equals(keys.get(k));
+                if (same) {
+                    for (int k = 0; k < cfg.size(); k++) cfg.get(k).applyLive(out.fixtures.get(k));
+                } else {
+                    List<Dmx.Fixture> fx = new ArrayList<>();
+                    keys = new ArrayList<>();
+                    for (DmxLight d : cfg) {
+                        fx.add(d.fixture());
+                        keys.add(d.layoutKey());
+                    }
+                    out = new Dmx.Output(fx);
+                }
+            }
+        }
+
+        void send(DatagramSocket sock) {
+            // the channel tester sends by itself; the show pauses for DMX meanwhile
+            if (out.isEmpty() || sock == null || Prefs.testLight != null) return;
+            try {
+                out.send(sock);
+            } catch (IOException ignored) {
+                // node unplugged or out of reach: the rest keeps going
+            }
+        }
+
+        void blackout(DatagramSocket sock) {
+            if (out.isEmpty() || sock == null) return;
+            out.blackout();
+            for (int k = 0; k < 3; k++) send(sock);
+        }
+    }
+
     private static final String[] CHORD_NAMES = {"C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"};
 
     // ------------------------------------------------------------------ ambient mode
@@ -528,6 +581,7 @@ public class SyncService extends Service {
         String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey(), area = prefs.areaId();
         DtlsPskClient dtls = null;
         DatagramSocket stripSock = null;
+        DmxRun dmxRun = new DmxRun();
         boolean streamingStarted = false;
         boolean hue = prefs.isConfigured();
         HueApi.Channels ch = HueApi.Channels.empty();
@@ -542,7 +596,9 @@ public class SyncService extends Service {
                 strips.add(st.output());
                 stripKeys.add(st.layoutKey());
             }
-            if (!hue && strips.isEmpty()) throw new IOException("Connect a Hue bridge or add an LED strip first.");
+            dmxRun.update(prefs);
+            if (!hue && strips.isEmpty() && dmxRun.out.isEmpty())
+                throw new IOException("Connect a Hue bridge or add an LED strip or DMX light first.");
             stripSock = new DatagramSocket();
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
             if (hue) {
@@ -606,6 +662,9 @@ public class SyncService extends Service {
                     perLight[i] = c != null ? c : as.color;
                 }
                 if (hue) hueRgb = hueAmb.render(dt, as, perLight);
+                dmxRun.update(prefs);
+                dmxRun.out.renderAmbient(dt, as);
+                dmxRun.send(stripSock);
                 for (StripOutput so : strips) {
                     try {
                         so.send(stripSock, so.renderAmbient(dt, as));
@@ -657,6 +716,7 @@ public class SyncService extends Service {
                 }
             }
             if (finished && prefs.keepColors()) keepColors(ip, user, ch, lights, hueRgb, strips, prefs);
+            else dmxRun.blackout(stripSock); // DMX nodes hold the last frame: that already keeps the colors
             if (stripSock != null) stripSock.close();
         }
     }
