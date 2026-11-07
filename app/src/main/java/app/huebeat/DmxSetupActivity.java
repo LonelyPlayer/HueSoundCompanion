@@ -167,8 +167,6 @@ public class DmxSetupActivity extends Activity {
         root.addView(channelsInfo, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 6), 0, 0));
         address.setOnFocusChangeListener((v, f) -> refreshChannels());
 
-        root.addView(label("Place in the room (left … right)"));
-        root.addView(Ui.slider(this, (light.x + 1f) / 2f, v -> light.x = v * 2f - 1f));
 
         // channels + tester
         root.addView(label("Channels"));
@@ -365,7 +363,13 @@ public class DmxSetupActivity extends Activity {
         }
         List<DmxLight> all = prefs.dmxLights();
         if (index >= 0 && index < all.size()) all.set(index, light);
-        else all.add(light);
+        else {
+            // a free spot until it's placed on the room plan
+            int k = all.size();
+            light.x = -0.6f + 0.4f * (k % 4);
+            light.y = 0.2f - 0.3f * ((k / 4) % 3);
+            all.add(light);
+        }
         prefs.saveDmx(all);
         setResult(RESULT_OK);
         finish();

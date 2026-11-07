@@ -187,6 +187,11 @@ public final class Prefs {
     public String areaId() { return sp.getString("areaId", null); }
     public String areaName() { return sp.getString("areaName", ""); }
 
+    /** Linked to a bridge (lamps are added as devices; no entertainment area needed). */
+    public boolean isPaired() {
+        return bridgeIp() != null && username() != null && clientKey() != null;
+    }
+
     public boolean isConfigured() {
         return bridgeIp() != null && username() != null && clientKey() != null && areaId() != null;
     }
@@ -226,6 +231,88 @@ public final class Prefs {
         sp.edit().putString("strips", a.toString()).apply();
         stripsCache = a.toString();
         stripsVersion++;
+    }
+
+    // ------------------------------------------------------------------ Hue lamps (devices)
+
+    public java.util.List<HueLamp> hueLamps() {
+        java.util.List<HueLamp> l = new java.util.ArrayList<>();
+        try {
+            String json = hueCache != null ? hueCache : sp.getString("hue_lamps", "[]");
+            JSONArray a = new JSONArray(json);
+            for (int i = 0; i < a.length(); i++) l.add(HueLamp.fromJson(a.getJSONObject(i)));
+        } catch (JSONException ignored) {
+        }
+        return l;
+    }
+
+    /** Bumped on every change to the Hue lamps (looks apply live; set changes rebuild the bridge setup). */
+    public static volatile int hueVersion = 0;
+    private volatile String hueCache;
+
+    public void saveHueLamps(java.util.List<HueLamp> l) {
+        JSONArray a = new JSONArray();
+        try {
+            for (HueLamp h : l) a.put(h.toJson());
+        } catch (JSONException ignored) {
+        }
+        sp.edit().putString("hue_lamps", a.toString()).apply();
+        hueCache = a.toString();
+        hueVersion++;
+    }
+
+    public boolean hasEnabledHue() {
+        if (!isPaired()) return false;
+        for (HueLamp h : hueLamps()) if (h.enabled) return true;
+        return false;
+    }
+
+    /** The app's own entertainment configuration on the bridge (replaces choosing an area). */
+    public String hueConfigId() {
+        return sp.getString("hue_config", null);
+    }
+
+    public void setHueConfigId(String id) {
+        sp.edit().putString("hue_config", id).apply();
+    }
+
+    /** Which lamps the configuration on the bridge was made for. */
+    public String hueConfigKey() {
+        return sp.getString("hue_config_key", "");
+    }
+
+    public void setHueConfigKey(String k) {
+        sp.edit().putString("hue_config_key", k).apply();
+    }
+
+    /** The old entertainment area was turned into lamp devices already. */
+    public boolean hueMigrated() {
+        return sp.getBoolean("hue_migrated", false);
+    }
+
+    public void setHueMigrated() {
+        sp.edit().putBoolean("hue_migrated", true).apply();
+    }
+
+    /** Which way effects run through the room: 0 left → right, 1 front → back, 2 around the room, 3 from the center. */
+    public static final String[] FLOWS = {"Left → right", "Front → back", "Around the room", "From the center"};
+
+    public int flow() {
+        flowCache = sp.getInt("flow", 0);
+        return flowCache;
+    }
+
+    public void setFlow(int f) {
+        sp.edit().putInt("flow", f).apply();
+        flowVersion++;
+    }
+
+    public static volatile int flowVersion = 0;
+    private static volatile int flowCache = 0;
+
+    /** The flow last read (for code without a Prefs at hand). */
+    public static int flowStatic() {
+        return flowCache;
     }
 
     // ------------------------------------------------------------------ DMX lights
@@ -270,7 +357,7 @@ public final class Prefs {
 
     /** Something to send light to: a Hue bridge and/or an enabled LED strip. */
     public boolean hasOutputs() {
-        return isConfigured() || hasEnabledStrips() || hasEnabledDmx();
+        return hasEnabledHue() || hasEnabledStrips() || hasEnabledDmx();
     }
 
     // audio source

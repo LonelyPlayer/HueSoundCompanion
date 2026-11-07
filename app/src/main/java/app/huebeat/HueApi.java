@@ -265,6 +265,184 @@ public final class HueApi {
         }
     }
 
+    // ------------------------------------------------------------------ lamps as devices
+
+    /** A lamp that can stream (has an entertainment service), with its position if a Hue area knows it. */
+    public static final class Lamp {
+        public String entService = "", lightId = "", name = "";
+        public int segments = 1;
+        public boolean hasPosition;
+        public float x, y, z, x2, y2;
+    }
+
+    /** All lamps on the bridge that can take part in entertainment streaming. */
+    public static List<Lamp> listLamps(String ip, String appKey) throws IOException {
+        List<Lamp> out = new ArrayList<>();
+        try {
+            JSONObject ents = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment", appKey, null, true));
+            checkErrors(ents);
+            JSONObject devs = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/device", appKey, null, true));
+            JSONObject cfgs = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment_configuration", appKey, null, true));
+            java.util.Map<String, String> devName = new java.util.HashMap<>(), devLight = new java.util.HashMap<>();
+            JSONArray dd = devs.getJSONArray("data");
+            for (int i = 0; i < dd.length(); i++) {
+                JSONObject d = dd.getJSONObject(i);
+                JSONObject meta = d.optJSONObject("metadata");
+                devName.put(d.getString("id"), meta != null ? meta.optString("name", "") : "");
+                JSONArray sv = d.optJSONArray("services");
+                if (sv == null) continue;
+                for (int k = 0; k < sv.length(); k++) {
+                    JSONObject x = sv.getJSONObject(k);
+                    if ("light".equals(x.optString("rtype"))) devLight.put(d.getString("id"), x.optString("rid"));
+                }
+            }
+            // positions the user already gave the lamps in Hue entertainment areas
+            java.util.Map<String, JSONArray> known = new java.util.HashMap<>();
+            JSONArray cd = cfgs.optJSONArray("data");
+            for (int i = 0; cd != null && i < cd.length(); i++) {
+                JSONObject loc = cd.getJSONObject(i).optJSONObject("locations");
+                JSONArray sl = loc != null ? loc.optJSONArray("service_locations") : null;
+                for (int k = 0; sl != null && k < sl.length(); k++) {
+                    JSONObject one = sl.getJSONObject(k);
+                    JSONObject svc = one.optJSONObject("service");
+                    JSONArray pos = one.optJSONArray("positions");
+                    if (svc != null && pos != null && pos.length() > 0 && !known.containsKey(svc.optString("rid"))) known.put(svc.optString("rid"), pos);
+                }
+            }
+            JSONArray ed = ents.getJSONArray("data");
+            for (int i = 0; i < ed.length(); i++) {
+                JSONObject e = ed.getJSONObject(i);
+                if (!e.optBoolean("renderer", false)) continue; // sensors etc.
+                Lamp l = new Lamp();
+                l.entService = e.getString("id");
+                JSONObject owner = e.optJSONObject("owner");
+                String dev = owner != null ? owner.optString("rid") : "";
+                l.name = devName.containsKey(dev) ? devName.get(dev) : "Hue lamp";
+                l.lightId = devLight.containsKey(dev) ? devLight.get(dev) : "";
+                JSONObject seg = e.optJSONObject("segments");
+                JSONArray sgs = seg != null ? seg.optJSONArray("segments") : null;
+                l.segments = sgs != null ? Math.max(1, Math.min(7, sgs.length())) : 1;
+                JSONArray pos = known.get(l.entService);
+                if (pos != null) {
+                    JSONObject p0 = pos.getJSONObject(0), p1 = pos.getJSONObject(pos.length() - 1);
+                    l.hasPosition = true;
+                    l.x = (float) p0.optDouble("x", 0);
+                    l.y = (float) p0.optDouble("y", 0);
+                    l.z = (float) p0.optDouble("z", 0);
+                    l.x2 = (float) p1.optDouble("x", l.x);
+                    l.y2 = (float) p1.optDouble("y", l.y);
+                }
+                out.add(l);
+            }
+        } catch (JSONException e) {
+            throw new IOException("Unexpected answer from bridge", e);
+        }
+        return out;
+    }
+
+    /** One lamp's place in the app's own entertainment configuration. */
+    public static final class Placed {
+        public String entService;
+        public float[][] positions; // 1 point, or 2 (start, end) for gradient lights
+    }
+
+    /**
+     * Creates or updates the app's own entertainment configuration with exactly these lamps and
+     * places (the bridge allows 10 lamps). Returns its id. Must not be streaming while it changes.
+     */
+    public static String ensureConfig(String ip, String appKey, String id, List<Placed> lamps) throws IOException {
+        try {
+            return writeConfig(ip, appKey, id, lamps, false);
+        } catch (IOException e) {
+            // some bridges take only one position per lamp
+            return writeConfig(ip, appKey, id, lamps, true);
+        }
+    }
+
+    private static String writeConfig(String ip, String appKey, String id, List<Placed> lamps, boolean single) throws IOException {
+        try {
+            JSONObject body = configBody(lamps, single);
+            boolean exists = false;
+            if (id != null && !id.isEmpty()) {
+                try {
+                    JSONObject cur = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment_configuration/" + id, appKey, null, true));
+                    exists = cur.optJSONArray("data") != null && cur.getJSONArray("data").length() > 0;
+                } catch (IOException ignored) {
+                    exists = false;
+                }
+            }
+            if (exists) {
+                JSONObject r = new JSONObject(request("PUT", "https://" + ip + "/clip/v2/resource/entertainment_configuration/" + id, appKey, body.toString(), true));
+                checkErrors(r);
+                return id;
+            }
+            body.put("type", "entertainment_configuration").put("configuration_type", "music");
+            JSONObject r = new JSONObject(request("POST", "https://" + ip + "/clip/v2/resource/entertainment_configuration", appKey, body.toString(), true));
+            checkErrors(r);
+            return r.getJSONArray("data").getJSONObject(0).getString("rid");
+        } catch (JSONException e) {
+            throw new IOException("Unexpected answer from bridge", e);
+        }
+    }
+
+    /** The body for creating/updating the app's entertainment configuration. */
+    static JSONObject configBody(List<Placed> lamps, boolean single) throws JSONException {
+        {
+            JSONArray sl = new JSONArray();
+            for (Placed p : lamps) {
+                JSONArray pos = new JSONArray();
+                int n = single ? 1 : p.positions.length;
+                for (int i = 0; i < n; i++) {
+                    float[] q = p.positions[i];
+                    pos.put(new JSONObject().put("x", (double) clampPos(q[0])).put("y", (double) clampPos(q[1])).put("z", (double) clampPos(q[2])));
+                }
+                sl.put(new JSONObject().put("service", new JSONObject().put("rid", p.entService).put("rtype", "entertainment"))
+                        .put("positions", pos));
+            }
+            return new JSONObject()
+                    .put("metadata", new JSONObject().put("name", "HueSoundCompanion"))
+                    .put("locations", new JSONObject().put("service_locations", sl));
+        }
+    }
+
+    private static float clampPos(float v) {
+        return Math.max(-1f, Math.min(1f, v));
+    }
+
+    /** Streaming channels of a configuration, each with the lamp (entertainment service) and segment it drives. */
+    public static final class ChannelMap {
+        public int[] ids;
+        public String[] service;
+        public int[] segment;
+    }
+
+    public static ChannelMap channelMap(String ip, String appKey, String id) throws IOException {
+        try {
+            JSONObject o = new JSONObject(request("GET", "https://" + ip + "/clip/v2/resource/entertainment_configuration/" + id, appKey, null, true));
+            checkErrors(o);
+            JSONArray data = o.getJSONArray("data");
+            if (data.length() == 0) throw new IOException("The app's lamp setup was removed from the bridge. Add the lamps again.");
+            JSONArray ch = data.getJSONObject(0).getJSONArray("channels");
+            ChannelMap m = new ChannelMap();
+            int n = Math.min(ch.length(), 20);
+            m.ids = new int[n];
+            m.service = new String[n];
+            m.segment = new int[n];
+            for (int i = 0; i < n; i++) {
+                JSONObject c = ch.getJSONObject(i);
+                m.ids[i] = c.getInt("channel_id");
+                JSONArray mem = c.optJSONArray("members");
+                JSONObject first = mem != null && mem.length() > 0 ? mem.getJSONObject(0) : null;
+                JSONObject svc = first != null ? first.optJSONObject("service") : null;
+                m.service[i] = svc != null ? svc.optString("rid", "") : "";
+                m.segment[i] = first != null ? first.optInt("index", 0) : 0;
+            }
+            return m;
+        } catch (JSONException e) {
+            throw new IOException("Unexpected answer from bridge", e);
+        }
+    }
+
     /** Name and light resource id behind every channel of an entertainment area. */
     public static final class ChannelLight {
         public int channel;

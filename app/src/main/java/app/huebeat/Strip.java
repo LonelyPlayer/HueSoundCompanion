@@ -26,6 +26,9 @@ final class Strip {
     // ambient mode
     int ambientEffect = -1;        // -1 = same as the lights, else Ambient.*
     int ambientColor = -1;            // -1 = same as the lights
+    /** Where it runs in the room (see core.Room); a group shares the look of its members. */
+    float x1 = -0.8f, y1 = 0.9f, x2 = 0.8f, y2 = 0.9f;
+    String group = "";
     // strobe overlay
     int strobeTrigger = 0; // off
     int strobeColor = 0xFFFFFF;
@@ -43,7 +46,8 @@ final class Strip {
                 .put("strobeAmount", (double) strobeAmount)
                 .put("variant", variant).put("blur", (double) blur)
                 .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor)
-                .put("brightnessMode", brightnessMode);
+                .put("brightnessMode", brightnessMode)
+                .put("x1", (double) x1).put("y1", (double) y1).put("x2", (double) x2).put("y2", (double) y2).put("group", group);
     }
 
     /** Everything that needs a new network output when it changes. */
@@ -56,6 +60,10 @@ final class Strip {
         so.palette = palette;
         so.brightness = brightness;
         so.brightnessMode = brightnessMode;
+        so.x1 = x1;
+        so.y1 = y1;
+        so.x2 = x2;
+        so.y2 = y2;
         so.effect.effect = effect;
         so.effect.speed = speed;
         so.effect.strobeTrigger = strobeTrigger;
@@ -67,6 +75,24 @@ final class Strip {
         so.effect.blur = blur;
         so.ambientEffect = ambientEffect;
         so.ambientColor = ambientColor;
+    }
+
+    /** Takes over the look of another member of the same group (not its connection, place or switch). */
+    void copyLookFrom(Strip o) {
+        effect = o.effect;
+        speed = o.speed;
+        variant = o.variant;
+        blur = o.blur;
+        palette = o.palette;
+        brightness = o.brightness;
+        brightnessMode = o.brightnessMode;
+        strobeTrigger = o.strobeTrigger;
+        strobeColor = o.strobeColor;
+        strobeLength = o.strobeLength;
+        strobeCover = o.strobeCover;
+        strobeAmount = o.strobeAmount;
+        ambientEffect = o.ambientEffect;
+        ambientColor = o.ambientColor;
     }
 
     /** Builds the network output for this strip with its effect settings. */
@@ -102,6 +128,11 @@ final class Strip {
         s.ambientEffect = o.optInt("ambientEffect", -1);
         s.ambientColor = o.optInt("ambientColor", -1);
         s.brightnessMode = Math.max(0, Math.min(2, o.optInt("brightnessMode", 0)));
+        s.x1 = (float) o.optDouble("x1", -0.8);
+        s.y1 = (float) o.optDouble("y1", 0.9);
+        s.x2 = (float) o.optDouble("x2", 0.8);
+        s.y2 = (float) o.optDouble("y2", 0.9);
+        s.group = o.optString("group", "");
         return s;
     }
 }

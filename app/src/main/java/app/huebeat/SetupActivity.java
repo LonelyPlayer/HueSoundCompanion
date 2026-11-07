@@ -57,7 +57,7 @@ public class SetupActivity extends Activity {
         content.setPadding(pad, Ui.dp(this, 20), pad, Ui.dp(this, 24));
         scroll.addView(content);
         Ui.setupWindow(this, scroll);
-        if (prefs.bridgeIp() != null && prefs.username() != null) showAreas();
+        if (false) showAreas(); // lamps are added on the main screen now
         else showFind();
     }
 
@@ -306,7 +306,7 @@ public class SetupActivity extends Activity {
                 try {
                     String[] creds = HueApi.pair(bridge.ip, device);
                     prefs.saveBridge(bridge.ip, bridge.name, creds[0], creds[1]);
-                    ui(this::showAreas);
+                    ui(this::linked);
                     return;
                 } catch (HueApi.LinkButtonNotPressed e) {
                     // keep polling
@@ -324,6 +324,12 @@ public class SetupActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ step 3: area
+
+    /** Linked: back to the main screen, which offers to add the bridge's lamps. */
+    private void linked() {
+        setResult(RESULT_OK);
+        finish();
+    }
 
     private void showAreas() {
         step = 3;

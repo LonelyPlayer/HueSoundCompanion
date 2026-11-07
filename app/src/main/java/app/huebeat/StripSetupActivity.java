@@ -303,7 +303,12 @@ public class StripSetupActivity extends Activity {
         if (!readForm()) return;
         List<Strip> all = prefs.strips();
         if (index >= 0 && index < all.size()) all.set(index, strip);
-        else all.add(strip);
+        else {
+            // along a wall, one after another, until placed on the room plan
+            int k = all.size();
+            strip.y1 = strip.y2 = 0.9f - 0.35f * (k % 6);
+            all.add(strip);
+        }
         prefs.saveStrips(all);
         setResult(RESULT_OK);
         finish();

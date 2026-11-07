@@ -31,6 +31,11 @@ public final class StripOutput {
     private Ambient ambient;
     private final Ambient.Settings ambientOwn = new Ambient.Settings();
 
+    /** Where the strip runs in the room: from (x1, y1) to (x2, y2), -1..1 (see {@link Room}). */
+    public volatile float x1 = -0.8f, y1 = 0.9f, x2 = 0.8f, y2 = 0.9f;
+    /** The global look's colors at this strip's segments (set by the engine every frame), or null. */
+    private volatile float[] global;
+
     /** The strip's own palette, or -1 to use the lights' palette (and screen colors). */
     public volatile int palette = -1;
     private final LightSettings own = new LightSettings();
@@ -84,6 +89,29 @@ public final class StripOutput {
         for (int i = 0; i < phase.length; i++) phase[i] = rnd.nextFloat();
     }
 
+    /** The controller's address (for the WLED JSON API). */
+    public String host() {
+        return address.getHostAddress();
+    }
+
+    /** Room places of the segments (for the global scene): {x[], y[]}. */
+    public float[][] points() {
+        float[] px = new float[segments], py = new float[segments];
+        // a mirrored strip's frame runs from its middle to its ends
+        float sx = mirror ? (x1 + x2) / 2f : x1, sy = mirror ? (y1 + y2) / 2f : y1;
+        for (int i = 0; i < segments; i++) {
+            float t = segments == 1 ? 0.5f : (float) i / (segments - 1);
+            px[i] = sx + (x2 - sx) * t;
+            py[i] = sy + (y2 - sy) * t;
+        }
+        return new float[][]{px, py};
+    }
+
+    /** The global look's colors at the segments, for this frame. */
+    public void setGlobal(float[] segRgb) {
+        global = segRgb;
+    }
+
     /** Screen / camera colors for this strip's segments (rgb per segment), or null. */
     public void setScreenColors(float[] seg) {
         renderer.setScreenColors(seg);
@@ -101,7 +129,10 @@ public final class StripOutput {
             own.screenColors = false;
         }
         LightSettings s = own;
-        if (effect.effect == StripEffect.LIGHTS) {
+        float[] g = global;
+        if (effect.effect == StripEffect.LIGHTS && palette < 0 && g != null && g.length >= 3 * segments) {
+            upsample(g, segments, logical, span); // the global look, at this strip's place in the room
+        } else if (effect.effect == StripEffect.LIGHTS) {
             float[] seg = renderer.render(f, t, dt, s);
             upsample(seg, segments, logical, span);
         } else {
@@ -115,6 +146,12 @@ public final class StripOutput {
 
     /** Ambient mode frame: the lights' animation or the strip's own, in its palette and color. */
     public float[] renderAmbient(float dt, Ambient.Settings lights) {
+        float[] g = global;
+        if (ambientEffect < 0 && palette < 0 && ambientColor < 0 && g != null && g.length >= 3 * segments) {
+            upsample(g, segments, logical, span); // the global animation, at this strip's place
+            applyBlur();
+            return logical;
+        }
         if (ambient == null) ambient = new Ambient(Ambient.line(span), true);
         ambientOwn.copyFrom(lights);
         if (ambientEffect >= 0) ambientOwn.animation = ambientEffect;
@@ -128,8 +165,8 @@ public final class StripOutput {
         // static colors: each pixel its color; "same as the lights" = the lamps' colors along the strip
         if (pixelColors == null || pixelColors.length != span) pixelColors = new int[span];
         for (int p = 0; p < span; p++) {
-            float x = span == 1 ? 0f : -1f + 2f * p / (span - 1);
-            pixelColors[p] = own >= 0 ? own : LampColors.at(x, lights.color);
+            float t = span == 1 ? 0.5f : (float) p / (span - 1);
+            pixelColors[p] = own >= 0 ? own : LampColors.at(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, lights.color);
         }
         ambientOwn.brightness = 1f;
         lightsLevel = lights.brightness;

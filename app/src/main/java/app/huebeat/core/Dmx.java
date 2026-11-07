@@ -92,12 +92,17 @@ public final class Dmx {
     /** What a light shows in music sync. */
     public static final int FX_LIKE = 0, FX_BEAT = 1, FX_MELODY = 2, FX_CHORDS = 3, FX_SPECTRUM = 4, FX_AMBIENT = 5,
             FX_PARTY = 6, FX_SOLID_PULSE = 7, FX_SOLID = 8, FX_OFF = 9;
-    public static final String[] EFFECTS = {"Like the lights", "Beat", "Melody", "Chords", "Spectrum", "Ambient", "Party",
+    public static final String[] EFFECTS = {"Global look", "Beat", "Melody", "Chords", "Spectrum", "Ambient", "Party",
             "Solid color · pulse on beats", "Solid color · steady", "Off"};
     public static final String[] EFFECT_CATEGORIES = {"Follow", "Own style", "Own style", "Own style", "Own style", "Own style",
             "Own style", "Fixed color", "Fixed color", "Fixed color"};
     private static final int[] FX_STYLE = {-1, LightSettings.STYLE_BEAT, LightSettings.STYLE_MELODY, LightSettings.STYLE_CHORDS,
             LightSettings.STYLE_SPECTRUM, LightSettings.STYLE_AMBIENT, LightSettings.STYLE_PARTY, -1, -1, -1};
+
+    /** The renderer style behind an effect (-1 = none: global, solid color or off). */
+    public static int styleOf(int fx) {
+        return fx >= 0 && fx < FX_STYLE.length ? FX_STYLE[fx] : -1;
+    }
 
     /** How a moving head moves. */
     public static final int MOVE_FIXED = 0, MOVE_SWING = 1, MOVE_CIRCLE = 2, MOVE_EIGHT = 3, MOVE_WANDER = 4, MOVE_SWEEP = 5,
@@ -152,13 +157,7 @@ public final class Dmx {
         private final Cues.Timer cueTimer = new Cues.Timer();
         private int lastSnare = Integer.MIN_VALUE;
         private int barBeats = 0, goboSlot = 1;
-        // own looks
-        private Renderer ownRenderer;
-        private Ambient ownAmbient;
-        private final LightSettings ownLs = new LightSettings();
-        private final Ambient.Settings ownAs = new Ambient.Settings();
-        private float env = 0f;
-        private final float[] one = new float[3];
+
 
         public Fixture(String name, String ip, int protocol, int universe, int address, float x, int[] roles) {
             this.name = name;
@@ -178,74 +177,6 @@ public final class Dmx {
 
         String key() {
             return ip + "|" + protocol + "|" + universe;
-        }
-
-        /** The light's own color in music sync (or the shared one for "Like the lights"). */
-        float[] musicColor(float[] shared, int i, Features f, double t, float dt, LightSettings lights, boolean beat) {
-            int fx = effect;
-            if (fx == FX_LIKE && palette < 0) {
-                one[0] = shared[3 * i];
-                one[1] = shared[3 * i + 1];
-                one[2] = shared[3 * i + 2];
-                return one;
-            }
-            if (fx == FX_OFF) {
-                one[0] = one[1] = one[2] = 0f;
-                return one;
-            }
-            if (fx == FX_SOLID || fx == FX_SOLID_PULSE) {
-                float v = 1f;
-                if (fx == FX_SOLID_PULSE) {
-                    float inten = lights.intensity, period = f != null && f.bpm > 0 ? 60f / f.bpm : 0.5f;
-                    if (beat) env = 1f;
-                    float tau = Math.max(0.06f, (1 - inten) * Math.max(0.25f, period * 0.9f) + inten * 0.06f);
-                    env *= (float) Math.exp(-dt / tau);
-                    float floor = (0.45f - 0.43f * inten);
-                    v = floor + (1f - floor) * env;
-                }
-                int c = color;
-                one[0] = ((c >> 16) & 0xFF) / 255f * v;
-                one[1] = ((c >> 8) & 0xFF) / 255f * v;
-                one[2] = (c & 0xFF) / 255f * v;
-                return one;
-            }
-            // an own style (or "like the lights" in its own palette): its own renderer
-            if (ownRenderer == null) ownRenderer = new Renderer(new float[]{x});
-            ownLs.copyFrom(lights);
-            ownLs.maxBrightness = 1f;
-            if (FX_STYLE[fx] >= 0) ownLs.style = FX_STYLE[fx];
-            if (palette >= 0) {
-                ownLs.palette = Math.min(palette, Palettes.count() - 1);
-                ownLs.screenColors = false;
-            }
-            float[] c = ownRenderer.render(f, t, dt, ownLs);
-            one[0] = c[0];
-            one[1] = c[1];
-            one[2] = c[2];
-            return one;
-        }
-
-        /** The light's own color in "Just lights". */
-        float[] ambientColor(float[] shared, int i, float dt, Ambient.Settings lights) {
-            if (ambientEffect < 0 && palette < 0 && ambientColor < 0) {
-                one[0] = shared[3 * i];
-                one[1] = shared[3 * i + 1];
-                one[2] = shared[3 * i + 2];
-                return one;
-            }
-            if (ownAmbient == null) ownAmbient = new Ambient(new float[]{clamp01((x + 1f) / 2f)}, false);
-            ownAs.copyFrom(lights);
-            ownAs.brightness = 1f;
-            if (ambientEffect >= 0) ownAs.animation = ambientEffect;
-            ownAmbient.follow = ambientEffect < 0 ? Ambient.master : null;
-            if (palette >= 0) ownAs.palette = Math.min(palette, Palettes.count() - 1);
-            int col = ambientColor >= 0 ? ambientColor : LampColors.at(x, lights.color);
-            ownAs.color = ambientColor >= 0 ? ambientColor : lights.color;
-            float[] c = ownAmbient.render(dt, ownAs, new int[]{col});
-            one[0] = c[0];
-            one[1] = c[1];
-            one[2] = c[2];
-            return one;
         }
 
         /**
@@ -460,9 +391,7 @@ public final class Dmx {
         private final Map<String, byte[]> universes = new LinkedHashMap<>();
         private final Map<String, Fixture> firstOf = new LinkedHashMap<>();
         private final Map<String, InetAddress> hosts = new LinkedHashMap<>();
-        private final Renderer renderer;
-        private Ambient ambient;
-        private final float[] xs;
+
         private int seq = 1;
         private final byte[] cid = new byte[16];
         private int lastBeat = Integer.MIN_VALUE;
@@ -472,9 +401,6 @@ public final class Dmx {
 
         public Output(List<Fixture> fixtures) {
             this.fixtures = fixtures;
-            xs = new float[Math.max(1, fixtures.size())];
-            for (int i = 0; i < fixtures.size(); i++) xs[i] = fixtures.get(i).x;
-            renderer = new Renderer(xs);
             new Random().nextBytes(cid);
             for (Fixture f : fixtures) {
                 universes.putIfAbsent(f.key(), new byte[512]);
@@ -486,62 +412,24 @@ public final class Dmx {
             return fixtures.isEmpty();
         }
 
-        public void setScreenColors(float[] rgb) {
-            renderer.setScreenColors(rgb);
-        }
-
-        /** Music frame. */
-        public float[] render(Features f, double t, float dt, LightSettings s) {
-            if (fixtures.isEmpty()) return new float[0];
-            LightSettings own = new LightSettings();
-            own.copyFrom(s);
-            own.maxBrightness = 1f;
-            float[] shared = renderer.render(f, t, dt, own);
+        /**
+         * One frame: each fixture's color (rgb 0..1 per fixture, from the scene or its look), its
+         * movement and its channels. {@code f} is null in just-lights mode.
+         */
+        public void write(float[] rgb, Features f, float dt, boolean ambient, float ambSpeed, float lightsLevel) {
             boolean beat = f != null && f.beatCount != lastBeat && lastBeat != Integer.MIN_VALUE;
             if (f != null) lastBeat = f.beatCount;
-            float[] rgb = new float[3 * fixtures.size()];
-            for (int i = 0; i < fixtures.size(); i++) {
-                float[] c = fixtures.get(i).musicColor(shared, i, f, t, dt, own, beat);
-                System.arraycopy(c, 0, rgb, 3 * i, 3);
+            if (overlay != null && !ambient) {
+                rgb = rgb.clone();
+                overlay.apply(rgb, fixtures.size());
             }
-            if (overlay != null) overlay.apply(rgb, fixtures.size());
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
             for (int i = 0; i < fixtures.size(); i++) {
                 Fixture fx = fixtures.get(i);
-                fx.motion(f, dt, beat, false, 0f);
-                fx.write(universes.get(fx.key()), rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], dt, s.maxBrightness);
+                fx.motion(f, dt, beat, ambient, ambSpeed);
+                fx.write(universes.get(fx.key()), rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], dt, lightsLevel);
             }
             lastRgb = rgb;
-            return rgb;
-        }
-
-        /** Just-lights frame. */
-        public float[] renderAmbient(float dt, Ambient.Settings s) {
-            if (fixtures.isEmpty()) return new float[0];
-            if (ambient == null) {
-                float[] pos = new float[xs.length];
-                for (int i = 0; i < pos.length; i++) pos[i] = clamp01((xs[i] + 1f) / 2f);
-                ambient = new Ambient(pos, false);
-            }
-            Ambient.Settings own = new Ambient.Settings();
-            own.copyFrom(s);
-            own.brightness = 1f;
-            // static colors: every light takes the lamp color at its place
-            int[] cols = new int[fixtures.size()];
-            for (int i = 0; i < cols.length; i++) cols[i] = LampColors.at(xs[i], s.color);
-            ambient.follow = Ambient.master;
-            float[] shared = ambient.render(dt, own, cols);
-            float[] rgb = new float[3 * fixtures.size()];
-            for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
-            for (int i = 0; i < fixtures.size(); i++) {
-                Fixture fx = fixtures.get(i);
-                float[] c = fx.ambientColor(shared, i, dt, own);
-                System.arraycopy(c, 0, rgb, 3 * i, 3);
-                fx.motion(null, dt, false, true, s.speed);
-                fx.write(universes.get(fx.key()), c[0], c[1], c[2], dt, s.brightness);
-            }
-            lastRgb = rgb;
-            return rgb;
         }
 
         /** Everything dark (sent when the sync stops). */
@@ -577,10 +465,6 @@ public final class Dmx {
             if (err != null && universes.size() == 1) throw err;
         }
 
-        /** Positions of the fixtures (for screen colors). */
-        public float[] positions() {
-            return xs;
-        }
     }
 
     static float clamp01(float v) {

@@ -184,7 +184,7 @@ public class SyncService extends Service {
 
     private void runEngine(int mode, MediaProjection mp, int gen) {
         Prefs prefs = Prefs.get(this);
-        String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey(), area = prefs.areaId();
+        String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey();
         AudioRecord rec = null;
         DtlsPskClient dtls = null;
         Thread audioThread = null;
@@ -193,30 +193,24 @@ public class SyncService extends Service {
         String screenError = null;
         boolean streamingStarted = false;
         DatagramSocket stripSock = null;
-        DmxRun dmxRun = new DmxRun();
         app.huebeat.core.Shuffle shuffle = new app.huebeat.core.Shuffle();
         app.huebeat.core.Buildup buildup = new app.huebeat.core.Buildup();
         app.huebeat.core.Cues.Timer lampTimer = new app.huebeat.core.Cues.Timer();
         float lampFlash = 0f;
         int lampBeat = 0, lampSnare = 0;
         boolean shuffled = false;
-        boolean hue = prefs.isConfigured();
+        Rig rig = new Rig();
+        String area = null;
+        boolean hue = false;
         try {
-            int seenStrips = Prefs.stripsVersion;
-            List<Strip> stripCfg = activeStrips(prefs);
-            List<StripOutput> strips = new ArrayList<>();
-            List<String> stripKeys = new ArrayList<>();
-            for (Strip st : stripCfg) {
-                strips.add(st.output());
-                stripKeys.add(st.layoutKey());
-            }
-            dmxRun.update(prefs);
-            if (!hue && strips.isEmpty() && dmxRun.out.isEmpty())
-                throw new IOException("Connect a Hue bridge or add an LED strip or DMX light first.");
-            stripSock = new DatagramSocket();
-
+            List<HueLamp> hueLamps = Rig.streamedLamps(prefs);
+            hue = !hueLamps.isEmpty();
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
-            HueApi.Channels ch = hue ? HueApi.channels(ip, user, area) : HueApi.Channels.empty();
+            if (hue) area = hueSetup(prefs, hueLamps, rig);
+            rig.update(prefs);
+            if (rig.isEmpty())
+                throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
+            stripSock = new DatagramSocket();
 
             rec = createRecorder(mode, mp, prefs);
             final AudioRecord frec = rec;
@@ -239,7 +233,6 @@ public class SyncService extends Service {
                 dtls = connect(ip, user, key);
             }
 
-            Renderer renderer = hue ? new Renderer(ch.x) : null;
             HueStream stream = hue ? new HueStream(area) : null;
             LightSettings ls = prefs.light;
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -254,11 +247,9 @@ public class SyncService extends Service {
             boolean useViz = false;
             String vizError = null;
             String blocker = mode == Prefs.MODE_APP ? prefs.appLabel() : "The playing app";
-            // TV camera: where each light sits on the screen, and what the lights showed recently
-            // all outputs side by side: Hue channels first, then every strip's segments
-            Layout lay = new Layout(ch, strips);
-            int nHue = lay.nHue;
-            float[] calRgb = new float[3 * nHue];
+            // TV camera / screen: where each point of the room sits on the screen (across = x, up = z)
+            app.huebeat.core.Scene laid = rig.scene;
+            float[][] cam = camLayout(rig);
             long[] lightT = new long[128];
             float[] lightC = new float[3 * 128];
             int lightPos = 0;
@@ -269,29 +260,13 @@ public class SyncService extends Service {
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
 
-                // LED strip settings changed in the app: apply them without restarting the sync
-                if (Prefs.stripsVersion != seenStrips) {
-                    seenStrips = Prefs.stripsVersion;
-                    List<Strip> cfg = activeStrips(prefs);
-                    boolean sameLayout = cfg.size() == strips.size();
-                    for (int k = 0; sameLayout && k < cfg.size(); k++) sameLayout = cfg.get(k).layoutKey().equals(stripKeys.get(k));
-                    if (sameLayout) {
-                        for (int k = 0; k < cfg.size(); k++) cfg.get(k).applyLive(strips.get(k));
-                    } else {
-                        strips = new ArrayList<>();
-                        stripKeys = new ArrayList<>();
-                        for (Strip st : cfg) {
-                            try {
-                                strips.add(st.output());
-                                stripKeys.add(st.layoutKey());
-                            } catch (IOException ignored) {
-                                // bad address: skip this strip
-                            }
-                        }
-                        lay = new Layout(ch, strips);
-                        if (screen != null) screen.setPositions(lay.allX, lay.allZ);
-                        updateNotification(prefs);
-                    }
+                // settings changed in the app: taken over without restarting the sync
+                rig.update(prefs);
+                if (rig.scene != laid) {
+                    laid = rig.scene;
+                    cam = camLayout(rig);
+                    if (screen != null) screen.setPositions(rig.screenX(), rig.screenZ());
+                    updateNotification(prefs);
                 }
                 Features cap = analyzer.latest();
                 boolean captureSilent = cap == null || cap.silent;
@@ -312,7 +287,7 @@ public class SyncService extends Service {
                     // (A capture session can create its screen mirror only once, so it then stays on.)
                     boolean wantScreen = ls.screenColors || ls.style == LightSettings.STYLE_SCREEN;
                     if (wantScreen && screen == null && mp != null && screenError == null && !CameraFeed.fresh(now)) {
-                        ScreenSource sc = new ScreenSource(this, lay.allX, lay.allZ);
+                        ScreenSource sc = new ScreenSource(this, rig.screenX(), rig.screenZ());
                         if (sc.start(mp)) screen = sc;
                         else screenError = sc.error;
                     }
@@ -356,10 +331,11 @@ public class SyncService extends Service {
                             break;
                         }
                     }
-                    CameraFeed.colors.compute(camGrid, past, lay.camU, lay.camV, lay.camOut);
-                    distribute(lay.camOut, renderer, lay, strips);
+                    CameraFeed.colors.compute(camGrid, past, cam[0], cam[1], cam[2]);
+                    rig.scene.setScreenColors(cam[2]);
                 } else {
-                    distribute(screen != null ? screen.colors() : null, renderer, lay, strips);
+                    float[] sc = screen != null ? screen.colors() : null;
+                    rig.scene.setScreenColors(sc != null && sc.length >= 3 * rig.scene.n ? sc : null);
                 }
 
                 // room-light calibration requested from the camera screen
@@ -372,7 +348,6 @@ public class SyncService extends Service {
                         CameraFeed.calibrationStatus = "Calibration needs the TV camera screen open.";
                     }
                 }
-                float[] rgb = null;
                 boolean calibrating = false;
                 float[] calColor = null;
                 if (calibrator != null) {
@@ -390,19 +365,12 @@ public class SyncService extends Service {
                             calibrator.addFrame(gt, camGrid);
                             lastCalFrame = gt;
                         }
-                        for (int i = 0; i < nHue; i++) {
-                            calRgb[3 * i] = lc[0];
-                            calRgb[3 * i + 1] = lc[1];
-                            calRgb[3 * i + 2] = lc[2];
-                        }
-                        rgb = calRgb;
                         calibrating = true;
                         calColor = lc;
                     }
                 }
                 Features f = active.at(now - ls.delayMs * 1_000_000L);
                 double tSec = (now - start) / 1e9;
-                dmxRun.update(prefs);
                 // Shuffle: the director picks style, palette and effects; everything renders with its picks
                 LightSettings use = ls;
                 // the vibe and build-up are always tracked: the strobes of every output use them
@@ -418,85 +386,69 @@ public class SyncService extends Service {
                 app.huebeat.core.Cues.impact = calibrating ? 0f : buildup.impact();
                 if (ls.style == LightSettings.STYLE_SHUFFLE) {
                     use = shuffle.out;
-                    for (int k = 0; k < strips.size(); k++) shuffle.applyStrip(k, strips.get(k));
-                    for (Dmx.Fixture fx : dmxRun.out.fixtures) shuffle.applyDmx(fx);
+                    for (int k = 0; k < rig.strips.size(); k++) shuffle.applyStrip(k, rig.strips.get(k));
+                    for (Dmx.Fixture fx : rig.dmx.fixtures) shuffle.applyDmx(fx);
                     SyncState.shuffle = shuffle.describe();
                     shuffled = true;
                 } else if (shuffled) {
                     // back to the user's own settings
                     shuffled = false;
                     SyncState.shuffle = "";
-                    List<Strip> cfg = activeStrips(prefs);
-                    for (int k = 0; k < cfg.size() && k < strips.size(); k++) cfg.get(k).applyLive(strips.get(k));
-                    dmxRun.seen = Integer.MIN_VALUE;
-                    dmxRun.update(prefs);
+                    Prefs.stripsVersion++;
+                    Prefs.dmxVersion++;
+                    rig.update(prefs);
                 }
                 boolean showBuild = ls.buildups && !calibrating;
                 shuffle.building = showBuild ? buildup.level() : 0f;
-                dmxRun.out.overlay = showBuild ? buildup : null;
-                if (!calibrating && renderer != null) {
-                    rgb = renderer.render(f, tSec, dt, use);
-                    if (showBuild) {
-                        rgb = rgb.clone(); // the renderer keeps its own frame for smoothing
-                        buildup.apply(rgb, rgb.length / 3);
-                    }
-                    // lamp strobe on high intensity / build-ups (Party snares are done by the renderer)
-                    int sm = ls.strobeMode;
-                    if (sm >= 2 && f != null && !f.silent) {
-                        boolean lb = f.beatCount != lampBeat, lsn = f.snareCount != lampSnare;
-                        int cue = sm == 2 ? app.huebeat.core.Cues.HIGH_INTENSITY : sm == 3 ? app.huebeat.core.Cues.BUILDUPS : app.huebeat.core.Cues.BOTH;
-                        if (app.huebeat.core.Cues.fire(cue, lb, lsn, dt, lampTimer)) lampFlash = 1f;
-                    }
-                    if (f != null) {
-                        lampBeat = f.beatCount;
-                        lampSnare = f.snareCount;
-                    }
-                    lampFlash *= (float) Math.exp(-dt / 0.05f);
-                    if (lampFlash > 0.02f) {
-                        if (!showBuild) rgb = rgb.clone();
-                        for (int i = 0; i < rgb.length; i++) rgb[i] += (1f - rgb[i]) * lampFlash;
-                    }
+                rig.dmx.overlay = showBuild ? buildup : null;
+                rig.music(f, tSec, dt, use, calibrating ? calColor : null);
+                float[] rgb = rig.hueColors();
+                if (showBuild) {
+                    rgb = rgb.clone();
+                    buildup.apply(rgb, rgb.length / 3);
                 }
-                if (!calibrating) dmxRun.out.render(f, tSec, dt, use);
-                float[][] stripRgb = new float[strips.size()][];
-                for (int k = 0; k < strips.size(); k++) {
-                    stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, use);
+                // lamp strobe on high intensity / build-ups (Party snares are done by the renderer)
+                int sm = ls.strobeMode;
+                if (sm >= 2 && f != null && !f.silent && !calibrating) {
+                    boolean lb = f.beatCount != lampBeat, lsn = f.snareCount != lampSnare;
+                    int cue = sm == 2 ? app.huebeat.core.Cues.HIGH_INTENSITY : sm == 3 ? app.huebeat.core.Cues.BUILDUPS : app.huebeat.core.Cues.BOTH;
+                    if (app.huebeat.core.Cues.fire(cue, lb, lsn, dt, lampTimer)) lampFlash = 1f;
+                }
+                if (f != null) {
+                    lampBeat = f.beatCount;
+                    lampSnare = f.snareCount;
+                }
+                lampFlash *= (float) Math.exp(-dt / 0.05f);
+                if (lampFlash > 0.02f) {
+                    if (!showBuild) rgb = rgb.clone();
+                    for (int i = 0; i < rgb.length; i++) rgb[i] += (1f - rgb[i]) * lampFlash;
+                }
+                if (calibrating) {
+                    float[] cc = new float[3 * rig.dmx.fixtures.size()];
+                    for (int i = 0; i < rig.dmx.fixtures.size(); i++) System.arraycopy(calColor, 0, cc, 3 * i, 3);
+                    rig.dmx.write(cc, f, dt, false, 0f, 1f);
+                } else {
+                    rig.dmx.write(rig.dmxColors(), f, dt, false, 0f, use.maxBrightness);
+                }
+                float[][] stripRgb = new float[rig.strips.size()][];
+                for (int k = 0; k < rig.strips.size(); k++) {
+                    StripOutput so = rig.strips.get(k);
+                    stripRgb[k] = calibrating ? so.fill(calColor) : so.render(f, tSec, dt, use);
                     if (showBuild) {
                         stripRgb[k] = stripRgb[k].clone();
                         buildup.applyStrip(stripRgb[k], stripRgb[k].length / 3);
                     }
                 }
                 // remember what the lights showed (average), for removing their glow from the camera image
-                float sr = 0f, sg = 0f, sb = 0f;
-                for (int i = 0; i < nHue; i++) {
-                    sr += rgb[3 * i];
-                    sg += rgb[3 * i + 1];
-                    sb += rgb[3 * i + 2];
-                }
-                for (float[] sRgb : stripRgb) {
-                    for (int i = 0; i < sRgb.length; i += 3) {
-                        sr += sRgb[i];
-                        sg += sRgb[i + 1];
-                        sb += sRgb[i + 2];
-                    }
-                }
+                float[] mean = rig.meanColor();
                 lightT[lightPos] = now;
-                int nAll = Math.max(1, lay.nch);
-                lightC[3 * lightPos] = sr / nAll;
-                lightC[3 * lightPos + 1] = sg / nAll;
-                lightC[3 * lightPos + 2] = sb / nAll;
+                lightC[3 * lightPos] = mean[0];
+                lightC[3 * lightPos + 1] = mean[1];
+                lightC[3 * lightPos + 2] = mean[2];
                 lightPos = (lightPos + 1) % lightT.length;
-                for (int k = 0; k < strips.size(); k++) {
-                    try {
-                        strips.get(k).send(stripSock, stripRgb[k]);
-                    } catch (IOException e) {
-                        if (!alive(gen)) break;
-                        // a strip that's switched off or out of Wi-Fi range shouldn't stop the rest
-                    }
-                }
-                dmxRun.send(stripSock);
+                rig.sendLocal(stripSock, stripRgb);
                 if (hue) try {
-                    dtls.send(stream.build(ch.ids, rgb));
+                    dtls.send(stream.build(rig.channelIds, rgb));
                     failures = 0;
                 } catch (IOException e) {
                     if (!alive(gen)) break;
@@ -509,7 +461,7 @@ public class SyncService extends Service {
                     SyncState.set(SyncState.Status.RUNNING, "");
                 }
 
-                float[] m = renderer != null ? renderer.meanColor() : (strips.isEmpty() ? new float[3] : strips.get(0).meanColor());
+                float[] m = rig.meanColor();
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
@@ -562,7 +514,7 @@ public class SyncService extends Service {
             if (alive(gen)) main.post(() -> shutdown(msg));
         } finally {
             if (gen == generation) running = false;
-            dmxRun.blackout(stripSock);
+            rig.blackoutDmx(stripSock);
             if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
             if (screen != null) screen.stop();
@@ -589,66 +541,6 @@ public class SyncService extends Service {
         }
     }
 
-    /** The DMX lights of a running sync, kept in step with the settings. */
-    private static final class DmxRun {
-        Dmx.Output out = new Dmx.Output(Dmx.none());
-        List<String> keys = new ArrayList<>();
-        int seen = Integer.MIN_VALUE;
-
-        void update(Prefs prefs) {
-            int v = Prefs.dmxVersion;
-            if (v != seen) {
-                seen = v;
-                List<DmxLight> cfg = new ArrayList<>();
-                for (DmxLight d : prefs.dmxLights()) if (d.enabled && !d.ip.isEmpty()) cfg.add(d);
-                boolean same = cfg.size() == keys.size();
-                for (int k = 0; same && k < cfg.size(); k++) same = cfg.get(k).layoutKey().equals(keys.get(k));
-                if (same) {
-                    for (int k = 0; k < cfg.size(); k++) cfg.get(k).applyLive(out.fixtures.get(k));
-                } else {
-                    List<Dmx.Fixture> fx = new ArrayList<>();
-                    keys = new ArrayList<>();
-                    for (DmxLight d : cfg) {
-                        fx.add(d.fixture());
-                        keys.add(d.layoutKey());
-                    }
-                    out = new Dmx.Output(fx);
-                }
-                // places within groups (for mirrored and chasing moves)
-                java.util.Map<String, Integer> count = new java.util.HashMap<>(), seen = new java.util.HashMap<>();
-                for (DmxLight d : cfg) if (!d.group.isEmpty()) count.merge(d.group, 1, Integer::sum);
-                for (int k = 0; k < cfg.size(); k++) {
-                    DmxLight d = cfg.get(k);
-                    Dmx.Fixture f = out.fixtures.get(k);
-                    if (d.group.isEmpty()) {
-                        f.memberIdx = 0;
-                        f.memberCount = 1;
-                    } else {
-                        int idx = seen.merge(d.group, 1, Integer::sum) - 1;
-                        f.memberIdx = idx;
-                        f.memberCount = count.get(d.group);
-                    }
-                }
-            }
-        }
-
-        void send(DatagramSocket sock) {
-            // the channel tester sends by itself; the show pauses for DMX meanwhile
-            if (out.isEmpty() || sock == null || Prefs.testLight != null) return;
-            try {
-                out.send(sock);
-            } catch (IOException ignored) {
-                // node unplugged or out of reach: the rest keeps going
-            }
-        }
-
-        void blackout(DatagramSocket sock) {
-            if (out.isEmpty() || sock == null) return;
-            out.blackout();
-            for (int k = 0; k < 3; k++) send(sock);
-        }
-    }
-
     private static final String[] CHORD_NAMES = {"C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"};
 
     // ------------------------------------------------------------------ ambient mode
@@ -656,56 +548,31 @@ public class SyncService extends Service {
     /** Lights without music: palettes, single colors per lamp and calm animations. */
     private void runAmbient(int gen) {
         Prefs prefs = Prefs.get(this);
-        String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey(), area = prefs.areaId();
+        String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey();
+        String area = null;
         DtlsPskClient dtls = null;
         DatagramSocket stripSock = null;
-        DmxRun dmxRun = new DmxRun();
         boolean streamingStarted = false;
-        boolean hue = prefs.isConfigured();
-        HueApi.Channels ch = HueApi.Channels.empty();
-        List<HueApi.ChannelLight> lights = null;
-        float[] hueRgb = null;
-        List<StripOutput> strips = new ArrayList<>();
+        Rig rig = new Rig();
+        boolean hue = false;
         boolean finished = false;
         try {
-            int seenStrips = Prefs.stripsVersion;
-            List<String> stripKeys = new ArrayList<>();
-            for (Strip st : activeStrips(prefs)) {
-                strips.add(st.output());
-                stripKeys.add(st.layoutKey());
-            }
-            dmxRun.update(prefs);
-            if (!hue && strips.isEmpty() && dmxRun.out.isEmpty())
-                throw new IOException("Connect a Hue bridge or add an LED strip or DMX light first.");
-            stripSock = new DatagramSocket();
+            List<HueLamp> hueLamps = Rig.streamedLamps(prefs);
+            hue = !hueLamps.isEmpty();
             SyncState.set(SyncState.Status.STARTING, hue ? "Connecting to bridge…" : "Starting…");
+            if (hue) area = hueSetup(prefs, hueLamps, rig);
+            rig.update(prefs);
+            if (rig.isEmpty()) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
+            stripSock = new DatagramSocket();
             if (hue) {
-                ch = HueApi.channels(ip, user, area);
-                try {
-                    lights = HueApi.channelLights(ip, user, area);
-                    StringBuilder names = new StringBuilder();
-                    for (HueApi.ChannelLight cl : lights) names.append(cl.channel).append('=').append(cl.name.replace('\n', ' ')).append('\n');
-                    prefs.setChannelNames(names.toString());
-                } catch (IOException ignored) {
-                    // names are only a convenience
-                }
                 HueApi.setStreaming(ip, user, area, true);
                 streamingStarted = true;
                 dtls = connect(ip, user, key);
             }
-            // lamps sit along the room from left to right
-            float[] pos = new float[ch.ids.length];
-            for (int i = 0; i < pos.length; i++) pos[i] = Math.max(0f, Math.min(1f, (ch.x[i] + 1f) / 2f));
-            Ambient hueAmb = new Ambient(pos, false);
-            Ambient clockAmb = new Ambient(new float[]{0.5f}, false);
             HueStream stream = hue ? new HueStream(area) : null;
-            int[] perLight = new int[ch.ids.length];
             Ambient.Settings as = prefs.ambient;
             SyncState.meter = 0f;
             SyncState.bpm = 0f;
-            SyncState.chord = "";
-            SyncState.visualizer = false;
-            SyncState.shuffle = "";
             SyncState.set(SyncState.Status.RUNNING, "");
             SyncState.setHint("");
             notifyAmbient(prefs);
@@ -716,52 +583,15 @@ public class SyncService extends Service {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
-                if (Prefs.stripsVersion != seenStrips) {
-                    seenStrips = Prefs.stripsVersion;
-                    List<Strip> cfg = activeStrips(prefs);
-                    boolean same = cfg.size() == strips.size();
-                    for (int k = 0; same && k < cfg.size(); k++) same = cfg.get(k).layoutKey().equals(stripKeys.get(k));
-                    if (same) {
-                        for (int k = 0; k < cfg.size(); k++) cfg.get(k).applyLive(strips.get(k));
-                    } else {
-                        strips = new ArrayList<>();
-                        stripKeys = new ArrayList<>();
-                        for (Strip st : cfg) {
-                            try {
-                                strips.add(st.output());
-                                stripKeys.add(st.layoutKey());
-                            } catch (IOException ignored) {
-                            }
-                        }
-                        notifyAmbient(prefs);
-                    }
-                }
-                java.util.Map<Integer, Integer> lc = prefs.lightColors;
-                for (int i = 0; i < perLight.length; i++) {
-                    Integer c = lc.get(ch.ids[i]);
-                    perLight[i] = c != null ? c : as.color;
-                }
-                if (hue) {
-                    hueRgb = hueAmb.render(dt, as, perLight);
-                    app.huebeat.core.LampColors.set(ch.x, perLight);
-                    Ambient.master = hueAmb;
-                } else {
-                    app.huebeat.core.LampColors.clear();
-                    clockAmb.render(dt, as, null); // no lamps: a clock everything else follows
-                    Ambient.master = clockAmb;
-                }
-                dmxRun.update(prefs);
-                dmxRun.out.renderAmbient(dt, as);
-                dmxRun.send(stripSock);
-                for (StripOutput so : strips) {
-                    try {
-                        so.send(stripSock, so.renderAmbient(dt, as));
-                    } catch (IOException e) {
-                        if (!alive(gen)) break;
-                    }
-                }
+                rig.update(prefs);
+                rig.ambient(dt, as);
+                rig.dmx.overlay = null;
+                rig.dmx.write(rig.dmxColors(), null, dt, true, as.speed, as.brightness);
+                float[][] stripRgb = new float[rig.strips.size()][];
+                for (int k = 0; k < rig.strips.size(); k++) stripRgb[k] = rig.strips.get(k).renderAmbient(dt, as);
+                rig.sendLocal(stripSock, stripRgb);
                 if (hue) try {
-                    dtls.send(stream.build(ch.ids, hueRgb));
+                    dtls.send(stream.build(rig.channelIds, rig.hueColors()));
                     failures = 0;
                 } catch (IOException e) {
                     if (!alive(gen)) break;
@@ -773,11 +603,7 @@ public class SyncService extends Service {
                     dtls = connect(ip, user, key);
                     SyncState.set(SyncState.Status.RUNNING, "");
                 }
-                float[] m = new float[3];
-                if (hueRgb != null && hueRgb.length >= 3) {
-                    int n = hueRgb.length / 3;
-                    for (int i = 0; i < n; i++) for (int k = 0; k < 3; k++) m[k] += hueRgb[3 * i + k] / n;
-                } else if (!strips.isEmpty()) m = strips.get(0).meanColor();
+                float[] m = rig.meanColor();
                 SyncState.r = m[0];
                 SyncState.g = m[1];
                 SyncState.b = m[2];
@@ -803,42 +629,78 @@ public class SyncService extends Service {
                 } catch (Exception ignored) {
                 }
             }
-            if (finished && prefs.keepColors()) keepColors(ip, user, ch, lights, hueRgb, strips, prefs);
-            else dmxRun.blackout(stripSock); // DMX nodes hold the last frame: that already keeps the colors
+            if (finished && prefs.keepColors()) keepColors(ip, user, rig);
+            else rig.blackoutDmx(stripSock); // DMX nodes hold the last frame: that already keeps the colors
             if (stripSock != null) stripSock.close();
+            Ambient.master = null;
         }
     }
 
-    /** Leaves the last colors on the lamps and strips after stopping, through their normal APIs. */
-    private static void keepColors(String ip, String user, HueApi.Channels ch, List<HueApi.ChannelLight> lights,
-                                   float[] rgb, List<StripOutput> strips, Prefs prefs) {
-        if (lights != null && rgb != null) {
-            // gradient lamps have several channels: average them per lamp
-            java.util.Map<String, float[]> perLamp = new java.util.LinkedHashMap<>();
-            for (HueApi.ChannelLight cl : lights) {
-                if (cl.lightId == null) continue;
-                int i = -1;
-                for (int k = 0; k < ch.ids.length; k++) if (ch.ids[k] == cl.channel) i = k;
-                if (i < 0 || 3 * i + 2 >= rgb.length) continue;
-                float[] acc = perLamp.get(cl.lightId);
-                if (acc == null) perLamp.put(cl.lightId, acc = new float[4]);
-                acc[0] += rgb[3 * i];
-                acc[1] += rgb[3 * i + 1];
-                acc[2] += rgb[3 * i + 2];
-                acc[3] += 1f;
-            }
-            for (java.util.Map.Entry<String, float[]> e : perLamp.entrySet()) {
-                float[] a = e.getValue();
+    /**
+     * Puts the streamed Hue lamps into the app's own entertainment configuration on the bridge
+     * (created or updated when the set of lamps changed) and wires its channels. Returns its id.
+     */
+    private static String hueSetup(Prefs prefs, List<HueLamp> lamps, Rig rig) throws IOException {
+        String ip = prefs.bridgeIp(), user = prefs.username();
+        String id = prefs.hueConfigId();
+        StringBuilder want = new StringBuilder();
+        for (HueLamp h : lamps) want.append(h.entService).append(',');
+        if (id == null || !want.toString().equals(prefs.hueConfigKey())) {
+            if (id != null) {
                 try {
-                    HueApi.setLightColor(ip, user, e.getKey(), a[0] / a[3], a[1] / a[3], a[2] / a[3]);
-                } catch (Exception ignored) {
+                    HueApi.setStreaming(ip, user, id, false);
+                } catch (IOException ignored) {
                 }
             }
+            List<HueApi.Placed> placed = new ArrayList<>();
+            for (HueLamp h : lamps) {
+                HueApi.Placed p = new HueApi.Placed();
+                p.entService = h.entService;
+                p.positions = h.gradient() ? new float[][]{{h.x, h.y, h.z}, {h.x2, h.y2, h.z}} : new float[][]{{h.x, h.y, h.z}};
+                placed.add(p);
+            }
+            id = HueApi.ensureConfig(ip, user, id, placed);
+            prefs.setHueConfigId(id);
+            prefs.setHueConfigKey(want.toString());
         }
-        List<Strip> cfg = activeStrips(prefs);
-        for (int k = 0; k < strips.size() && k < cfg.size(); k++) {
+        HueApi.ChannelMap map;
+        try {
+            map = HueApi.channelMap(ip, user, id);
+        } catch (IOException e) {
+            // removed on the bridge in the meantime: make it again
+            prefs.setHueConfigKey("");
+            prefs.setHueConfigId(null);
+            return hueSetup(prefs, lamps, rig);
+        }
+        rig.setHue(lamps, map);
+        return id;
+    }
+
+    /** Camera layout: where each room point sits in the camera picture, plus the output buffer. */
+    private static float[][] camLayout(Rig rig) {
+        int n = rig.scene.n;
+        float[] u = new float[n], v = new float[n];
+        for (int i = 0; i < n; i++) {
+            u[i] = Math.max(0f, Math.min(1f, (rig.scene.x[i] + 1f) / 2f));
+            v[i] = Math.max(0f, Math.min(1f, 1f - (rig.scene.z[i] + 1f) / 2f));
+        }
+        return new float[][]{u, v, new float[3 * n]};
+    }
+
+    /** Leaves the last colors on the lamps and strips after stopping, through their normal APIs. */
+    private static void keepColors(String ip, String user, Rig rig) {
+        for (int k = 0; k < rig.lamps.size(); k++) {
+            HueLamp h = rig.lamps.get(k);
+            if (h.lightId.isEmpty()) continue;
+            float[] c = rig.lampColor(k);
             try {
-                WledApi.setColors(cfg.get(k).ip, strips.get(k).physicalColors());
+                HueApi.setLightColor(ip, user, h.lightId, c[0], c[1], c[2]);
+            } catch (Exception ignored) {
+            }
+        }
+        for (StripOutput so : rig.strips) {
+            try {
+                WledApi.setColors(so.host(), so.physicalColors());
             } catch (Exception ignored) {
                 // not a WLED controller, or unreachable
             }
@@ -846,63 +708,8 @@ public class SyncService extends Service {
     }
 
     private void notifyAmbient(Prefs prefs) {
-        List<String> targets = new ArrayList<>();
-        if (prefs.isConfigured()) targets.add(prefs.areaName());
-        for (Strip st : prefs.strips()) if (st.enabled) targets.add(st.name);
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.notify(NOTIFICATION_ID, buildNotification("Lighting " + String.join(", ", targets)));
-    }
-
-    /** Positions of every output channel side by side: Hue channels, then each strip's segments. */
-    private static final class Layout {
-        final int nHue, nch;
-        final float[] allX, allZ, camU, camV, camOut;
-        final int[] stripOff;
-
-        Layout(HueApi.Channels ch, List<StripOutput> strips) {
-            nHue = ch.ids.length;
-            int n = nHue;
-            for (StripOutput so : strips) n += so.segments;
-            nch = n;
-            allX = new float[n];
-            allZ = new float[n];
-            System.arraycopy(ch.x, 0, allX, 0, nHue);
-            System.arraycopy(ch.z, 0, allZ, 0, nHue);
-            stripOff = new int[strips.size()];
-            for (int k = 0, o = nHue; k < strips.size(); k++) {
-                StripOutput so = strips.get(k);
-                stripOff[k] = o;
-                System.arraycopy(so.segX, 0, allX, o, so.segments); // strips run along the screen's width
-                o += so.segments;
-            }
-            camU = new float[n];
-            camV = new float[n];
-            camOut = new float[3 * n];
-            for (int i = 0; i < n; i++) {
-                camU[i] = Math.max(0f, Math.min(1f, (allX[i] + 1f) / 2f));
-                camV[i] = Math.max(0f, Math.min(1f, 1f - (allZ[i] + 1f) / 2f));
-            }
-        }
-    }
-
-    private static List<Strip> activeStrips(Prefs prefs) {
-        List<Strip> l = new ArrayList<>();
-        for (Strip st : prefs.strips()) if (st.enabled && !st.ip.isEmpty()) l.add(st);
-        return l;
-    }
-
-    /** Hands the screen/camera colors (all outputs side by side) to each output's renderer. */
-    private static void distribute(float[] all, Renderer hueRenderer, Layout lay, List<StripOutput> strips) {
-        if (all == null || all.length < 3 * lay.nch) {
-            if (hueRenderer != null) hueRenderer.setScreenColors(null);
-            for (StripOutput so : strips) so.setScreenColors(null);
-            return;
-        }
-        if (hueRenderer != null) hueRenderer.setScreenColors(java.util.Arrays.copyOfRange(all, 0, 3 * lay.nHue));
-        for (int k = 0; k < strips.size(); k++) {
-            int o = 3 * lay.stripOff[k];
-            strips.get(k).setScreenColors(java.util.Arrays.copyOfRange(all, o, o + 3 * strips.get(k).segments));
-        }
+        nm.notify(NOTIFICATION_ID, buildNotification("Lighting " + targetsText(prefs)));
     }
 
     private static DtlsPskClient connect(String ip, String user, String key) throws IOException {
@@ -1044,6 +851,17 @@ public class SyncService extends Service {
                 .build();
     }
 
+    /** "3 Hue lamps, Desk strip, 2 DMX lights" */
+    private static String targetsText(Prefs prefs) {
+        List<String> t = new ArrayList<>();
+        int hue = Rig.streamedLamps(prefs).size();
+        if (hue > 0) t.add(hue == 1 ? "1 Hue lamp" : hue + " Hue lamps");
+        for (Strip st : Rig.activeStrips(prefs)) t.add(st.name);
+        int dmx = Rig.activeDmx(prefs).size();
+        if (dmx > 0) t.add(dmx == 1 ? "1 DMX light" : dmx + " DMX lights");
+        return t.isEmpty() ? "lights" : String.join(", ", t);
+    }
+
     private void updateNotification(Prefs prefs) {
         String src;
         switch (prefs.mode()) {
@@ -1051,11 +869,8 @@ public class SyncService extends Service {
             case Prefs.MODE_MIC: src = "microphone"; break;
             default: src = "phone audio";
         }
-        List<String> targets = new ArrayList<>();
-        if (prefs.isConfigured()) targets.add(prefs.areaName());
-        for (Strip st : prefs.strips()) if (st.enabled) targets.add(st.name);
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.notify(NOTIFICATION_ID, buildNotification("Syncing " + String.join(", ", targets) + " to " + src));
+        nm.notify(NOTIFICATION_ID, buildNotification("Syncing " + targetsText(prefs) + " to " + src));
     }
 
     @SuppressWarnings("deprecation")

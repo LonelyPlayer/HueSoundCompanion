@@ -38,7 +38,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_SETUP = 4;
     private static final int REQ_EDIT_PALETTE = 5;
     private static final int REQ_STRIP = 6;
-    private LinearLayout stripsBox, dmxBox, shuffleRow;
+    private LinearLayout stripsBox, dmxBox, shuffleRow, hueBox;
+    private List<HueLamp> hueList = new ArrayList<>();
+    private static final int REQ_ROOM = 10;
     private List<DmxLight> dmxList;
     private static final int REQ_DMX = 9;
     private LinearLayout palettesRow;
@@ -63,11 +65,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private Ui.IntSet paletteTarget;
     private LinearLayout ambPaletteBox;
     private final List<TextView> appModeChips = new ArrayList<>();
-    private LinearLayout musicTop, musicLook, ambientLook, lightsList, lampBox;
+    private LinearLayout musicTop, musicLook, ambientLook;
     private TextView ambAnimBtn, ambColorBtn;
-    private String shownNames = null;
-    private final List<Runnable> lampRows = new ArrayList<>();
-    private boolean fetchingNames = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -82,6 +81,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        migrateHue();
         SyncState.add(this);
         refresh();
     }
@@ -176,7 +176,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
         // style
         musicLook = Ui.column(this);
         root.addView(musicLook);
-        LinearLayout look = collapsible(musicLook, "Look", "open_look", true);
+        LinearLayout look = collapsible(musicLook, "Global look", "open_look", true);
+        roomControls(look);
         look.addView(section("Style"));
         HorizontalScrollView styleScroll = new HorizontalScrollView(this);
         styleScroll.setHorizontalScrollBarEnabled(false);
@@ -256,7 +257,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
         ambientLook = Ui.column(this);
         root.addView(ambientLook);
-        buildAmbient(collapsible(ambientLook, "Lights", "open_ambient", true));
+        buildAmbient(collapsible(ambientLook, "Global look", "open_ambient", true));
+
+        LinearLayout hueSection = collapsible(root, "Hue lamps", "open_hue", true);
+        hueBox = Ui.column(this);
+        hueSection.addView(hueBox);
+        rebuildHue();
 
         LinearLayout stripsSection = collapsible(root, "LED strips", "open_strips", true);
         stripsBox = Ui.column(this);
@@ -297,7 +303,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private static String[] withSame(String[] names) {
         String[] o = new String[names.length + 1];
-        o[0] = "Same as lights";
+        o[0] = "Global";
         System.arraycopy(names, 0, o, 1, names.length);
         return o;
     }
@@ -329,6 +335,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private void buildAmbient(LinearLayout box) {
         Ambient.Settings a = prefs.ambient;
+        roomControls(box);
         box.addView(section("Animation"));
         ambAnimBtn = pickerButton(Ambient.NAMES[a.animation] + "  ▸");
         ambAnimBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", Ambient.NAMES, Ambient.CATEGORIES, a.animation, k -> {
@@ -350,17 +357,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             a.color = c;
             prefs.saveAmbient();
             setDot(ambColorBtn, c);
-            for (Runnable r : lampRows) r.run();
+
         }));
         box.addView(ambColorBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
-
-        lampBox = Ui.column(this);
-        lampBox.addView(section("Each lamp"));
-        TextView lh = Ui.text(this, "Tap a lamp to give it its own color.", 13, Ui.SUB, false);
-        lampBox.addView(lh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
-        lightsList = Ui.column(this);
-        lampBox.addView(lightsList);
-        box.addView(lampBox);
 
         box.addView(section("Speed"));
         box.addView(Ui.slider(this, a.speed, v -> {
@@ -381,107 +380,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
         keep.setOnCheckedChangeListener((bv, on) -> prefs.setKeepColors(on));
         keepRow.addView(keep);
         box.addView(keepRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
-        rebuildLamps();
-    }
-
-    /** The per-lamp color list (names come from the bridge and are cached). */
-    private void rebuildLamps() {
-        if (lightsList == null) return;
-        String names = prefs.channelNames();
-        if (names.equals(shownNames)) return;
-        shownNames = names;
-        lightsList.removeAllViews();
-        lampRows.clear();
-        if (!prefs.isConfigured()) {
-            lightsList.addView(Ui.text(this, "No Hue bridge connected.", 14, Ui.SUB, false));
-            return;
-        }
-        if (names.isEmpty()) {
-            lightsList.addView(Ui.text(this, "Loading lamps…", 14, Ui.SUB, false));
-            fetchLampNames();
-            return;
-        }
-        for (String line : names.split("\n")) {
-            int eq = line.indexOf('=');
-            if (eq <= 0) continue;
-            final int channel;
-            try {
-                channel = Integer.parseInt(line.substring(0, eq));
-            } catch (NumberFormatException e) {
-                continue;
-            }
-            String name = line.substring(eq + 1);
-            TextView row = pickerButton(name);
-            Runnable show = () -> {
-                Integer c0 = prefs.lightColors.get(channel);
-                row.setText(c0 == null ? name + "  ·  main color" : name);
-                setDot(row, c0 != null ? c0 : prefs.ambient.color);
-            };
-            show.run();
-            row.setOnClickListener(v -> {
-                Integer cur = prefs.lightColors.get(channel);
-                Pickers.color(this, name, cur != null ? cur : -1, c -> {
-                    prefs.setLightColor(channel, c);
-                    show.run();
-                }, () -> {
-                    prefs.setLightColor(channel, -1);
-                    show.run();
-                }, "Same as main color");
-            });
-            lampRows.add(show);
-            lightsList.addView(row, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
-        }
-    }
-
-    private void fetchLampNames() {
-        if (fetchingNames) return;
-        fetchingNames = true;
-        final String ip = prefs.bridgeIp(), user = prefs.username(), area = prefs.areaId();
-        new Thread(() -> {
-            String result = null;
-            try {
-                StringBuilder sb = new StringBuilder();
-                for (HueApi.ChannelLight cl : HueApi.channelLights(ip, user, area)) {
-                    sb.append(cl.channel).append('=').append(cl.name.replace('\n', ' ')).append('\n');
-                }
-                result = sb.toString();
-            } catch (Exception ignored) {
-            }
-            final String r = result;
-            main.post(() -> {
-                fetchingNames = false;
-                if (isFinishing()) return;
-                if (r != null && !r.isEmpty()) {
-                    prefs.setChannelNames(r);
-                    rebuildLamps();
-                } else {
-                    lightsList.removeAllViews();
-                    lightsList.addView(Ui.text(this, "Couldn't reach the bridge to list the lamps.", 14, Ui.SUB, false));
-                    shownNames = null;
-                }
-            });
-        }, "lamp-names").start();
-    }
-
-    /**
-     * A different entertainment area was chosen: lamps of the old area that aren't in the new one
-     * go off. A running sync is stopped first (lamps can't be switched while they stream), then
-     * restarted on the new area.
-     */
-    private void onAreaChanged(String oldArea) {
-        final boolean wasActive = SyncState.isActive();
-        if (wasActive) SyncService.stop(this);
-        final String ip = prefs.bridgeIp(), user = prefs.username(), newArea = prefs.areaId();
-        new Thread(() -> {
-            try {
-                if (wasActive) Thread.sleep(1500); // let the old stream end
-                HueApi.turnOffLeftovers(ip, user, oldArea, newArea);
-            } catch (Exception ignored) {
-            }
-            main.post(() -> {
-                if (wasActive && !isFinishing()) startFlow();
-            });
-        }, "area-change").start();
     }
 
     private void onAppModeSelected(int m) {
@@ -490,6 +388,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         prefs.setAppMode(m);
         rebuildStrips();
         rebuildDmx();
+        rebuildHue();
         refresh();
         if (wasActive) {
             SyncService.stop(this);
@@ -577,14 +476,684 @@ public class MainActivity extends Activity implements SyncState.Listener {
         prefs.saveStrips(stripList);
     }
 
+    // ------------------------------------------------------------------ room, groups, Hue lamps
+
+    /** Global: which way effects run through the room, and the room plan. */
+    private void roomControls(LinearLayout box) {
+        box.addView(section("Direction in the room"));
+        box.addView(Ui.chipRow(this, Prefs.FLOWS, () -> prefs.flow(), v -> prefs.setFlow(v)));
+        TextView plan = pickerButton("Room plan: place your lights  ▸");
+        plan.setOnClickListener(v -> startActivityForResult(new Intent(this, RoomActivity.class), REQ_ROOM));
+        box.addView(plan, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+    }
+
+    /** A collapsible device/group card: header (title, gear, switch) and a body. */
+    private LinearLayout[] shell(String titleText, String key, Runnable gear, boolean on,
+                                 android.widget.CompoundButton.OnCheckedChangeListener sw, TextView[] titleOut) {
+        android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        LinearLayout card = Ui.column(this);
+        card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
+        card.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10));
+        LinearLayout head = Ui.row(this);
+        boolean open = ui.getBoolean(key, false);
+        TextView chev = Ui.text(this, open ? "▾" : "▸", 18, Ui.SUB, true);
+        chev.setPadding(0, 0, Ui.dp(this, 10), 0);
+        head.addView(chev);
+        TextView t = Ui.text(this, titleText, 15, Ui.TEXT, true);
+        t.setLineSpacing(0, 1.15f);
+        head.addView(t, Ui.lp(0, Ui.WRAP, 1));
+        if (titleOut != null) titleOut[0] = t;
+        if (gear != null) {
+            TextView g = Ui.text(this, "⚙", 20, Ui.SUB, false);
+            g.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
+            g.setContentDescription("Settings");
+            g.setOnClickListener(v -> gear.run());
+            head.addView(g);
+        }
+        Switch onSw = new Switch(this);
+        onSw.setChecked(on);
+        onSw.setOnCheckedChangeListener(sw);
+        head.addView(onSw);
+        card.addView(head);
+        LinearLayout body = Ui.column(this);
+        body.setPadding(0, 0, Ui.dp(this, 6), Ui.dp(this, 4));
+        body.setVisibility(open ? View.VISIBLE : View.GONE);
+        head.setClickable(true);
+        head.setOnClickListener(v -> {
+            boolean o = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(o ? View.VISIBLE : View.GONE);
+            chev.setText(o ? "▾" : "▸");
+            ui.edit().putBoolean(key, o).apply();
+        });
+        card.addView(body);
+        return new LinearLayout[]{card, body};
+    }
+
+    interface MembersPicked {
+        void picked(List<Integer> chosen, String name);
+    }
+
+    /** Pick two or more devices and name the group. */
+    private void pickMembers(String title, String hint, String[] names, MembersPicked done) {
+        boolean[] checked = new boolean[names.length];
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        android.widget.EditText nameField = new android.widget.EditText(this);
+        nameField.setHint(hint);
+        nameField.setSingleLine(true);
+        nameField.setTextColor(Ui.TEXT);
+        nameField.setHintTextColor(0xFF5C5D66);
+        box.addView(nameField);
+        for (int i = 0; i < names.length; i++) {
+            final int k = i;
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(names[i]);
+            cb.setTextColor(Ui.TEXT);
+            cb.setOnCheckedChangeListener((bv, c) -> checked[k] = c);
+            box.addView(cb);
+        }
+        ScrollView sc = new ScrollView(this);
+        sc.addView(box);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(title)
+                .setView(sc)
+                .setPositiveButton("Group", (dlg, w) -> {
+                    List<Integer> chosen = new ArrayList<>();
+                    for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(i);
+                    if (chosen.size() < 2) {
+                        android.widget.Toast.makeText(this, "Pick at least two", android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    done.picked(chosen, nameField.getText().toString().trim());
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Rename or dissolve a group. */
+    private void groupDialog(String name, java.util.function.Consumer<String> rename, Runnable ungroup) {
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setText(name);
+        field.setSingleLine(true);
+        field.setTextColor(Ui.TEXT);
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        box.addView(field);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Group")
+                .setView(box)
+                .setPositiveButton("Rename", (dlg, w) -> {
+                    String n = field.getText().toString().trim();
+                    if (!n.isEmpty()) rename.accept(n);
+                })
+                .setNeutralButton("Ungroup", (dlg, w) -> ungroup.run())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ---- Hue lamps
+
+    private void rebuildHue() {
+        if (hueBox == null) return;
+        hueBox.removeAllViews();
+        hueList = prefs.hueLamps();
+        if (!prefs.isPaired()) {
+            TextView t = Ui.button(this, "Connect a Hue bridge", false);
+            t.setOnClickListener(v -> startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP));
+            hueBox.addView(t, Ui.lp(Ui.MATCH, Ui.WRAP));
+            return;
+        }
+        int on = 0;
+        for (HueLamp h : hueList) if (h.enabled) on++;
+        if (on > 10) {
+            TextView w = Ui.text(this, "Hue streams to at most 10 lamps at a time: only the first 10 switched on take part.",
+                    13, Ui.SUB, false);
+            hueBox.addView(w, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        }
+        java.util.Set<String> shown = new java.util.HashSet<>();
+        for (int i = 0; i < hueList.size(); i++) {
+            final HueLamp h = hueList.get(i);
+            if (!h.group.isEmpty()) {
+                if (shown.add(h.group)) hueBox.addView(hueGroupCard(h.group), Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
+                continue;
+            }
+            TextView[] title = new TextView[1];
+            LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> hueLampDialog(h), h.enabled, (bv, checked) -> {
+                h.enabled = checked;
+                saveHue(true);
+            }, title);
+            buildHueBody(c[1], h, false, title[0]);
+            hueBox.addView(c[0], Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
+        }
+        TextView add = Ui.button(this, "+ Add Hue lamps", false);
+        add.setOnClickListener(v -> addHueLamps());
+        hueBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        int loose = 0;
+        for (HueLamp h : hueList) if (h.group.isEmpty()) loose++;
+        if (loose >= 2) {
+            TextView grp = Ui.button(this, "+ Group lamps", false);
+            grp.setOnClickListener(v -> {
+                List<HueLamp> free = new ArrayList<>();
+                for (HueLamp h : hueList) if (h.group.isEmpty()) free.add(h);
+                String[] names = new String[free.size()];
+                for (int i = 0; i < names.length; i++) names[i] = free.get(i).name;
+                pickMembers("Group lamps", "Group name, e.g. Living room", names, (chosen, name) -> {
+                    String g = name.isEmpty() ? "Lamps" : name;
+                    for (HueLamp o : hueList) if (g.equals(o.group)) g = g + " 2";
+                    HueLamp lead = free.get(chosen.get(0));
+                    for (int k : chosen) {
+                        free.get(k).group = g;
+                        if (free.get(k) != lead) free.get(k).copyLookFrom(lead);
+                    }
+                    saveHue(false);
+                    rebuildHue();
+                });
+            });
+            hueBox.addView(grp, Ui.lp(Ui.MATCH, Ui.WRAP));
+        }
+    }
+
+    private String hueTitle(HueLamp h) {
+        String what = ambientMode() ? (h.ambientEffect < 0 ? "Global" : Ambient.NAMES[Math.min(h.ambientEffect, Ambient.NAMES.length - 1)])
+                : app.huebeat.core.Dmx.EFFECTS[h.effect];
+        return h.name + "\n" + what + (h.gradient() ? " · " + h.segments + " segments" : "");
+    }
+
+    /** Saves the lamps; {@code members}: the set of streamed lamps changed (a running sync restarts). */
+    private void saveHue(boolean members) {
+        prefs.saveHueLamps(hueList);
+        if (members && SyncState.isActive()) {
+            SyncService.stop(this);
+            main.postDelayed(this::startFlow, 900);
+        }
+        refresh();
+    }
+
+    private void saveHueFrom(HueLamp h) {
+        if (!h.group.isEmpty()) {
+            for (HueLamp o : hueList) if (o != h && h.group.equals(o.group)) o.copyLookFrom(h);
+        }
+        prefs.saveHueLamps(hueList);
+    }
+
+    /** The look controls of a Hue lamp card (or a group card: they set every member). */
+    private void buildHueBody(LinearLayout body, HueLamp h, boolean group, TextView title) {
+        final boolean amb = ambientMode();
+        if (amb) {
+            body.addView(Ui.label(this, "Animation"));
+            TextView animBtn = pickerButton((h.ambientEffect < 0 ? "Global" : Ambient.NAMES[h.ambientEffect]) + "  ▸");
+            animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
+                    h.ambientEffect + 1, k -> {
+                        h.ambientEffect = k - 1;
+                        saveHueFrom(h);
+                        animBtn.setText((h.ambientEffect < 0 ? "Global" : Ambient.NAMES[h.ambientEffect]) + "  ▸");
+                        if (title != null && !group) title.setText(hueTitle(h));
+                    }));
+            body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            TextView colBtn = pickerButton("");
+            Runnable showCol = () -> {
+                colBtn.setText(h.ambientColor < 0 ? "Color: global" : "Color");
+                setDot(colBtn, h.ambientColor < 0 ? prefs.ambient.color : h.ambientColor);
+            };
+            showCol.run();
+            colBtn.setOnClickListener(v -> Pickers.color(this, "Color", h.ambientColor, c -> {
+                h.ambientColor = c;
+                saveHueFrom(h);
+                showCol.run();
+            }, () -> {
+                h.ambientColor = -1;
+                saveHueFrom(h);
+                showCol.run();
+            }));
+            body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        } else {
+            body.addView(Ui.label(this, "Effect"));
+            LinearLayout colorBox = Ui.column(this);
+            TextView fxBtn = pickerButton(app.huebeat.core.Dmx.EFFECTS[h.effect] + "  ▸");
+            body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            body.addView(colorBox);
+            Runnable showColor = () -> {
+                colorBox.removeAllViews();
+                boolean solid = h.effect == app.huebeat.core.Dmx.FX_SOLID || h.effect == app.huebeat.core.Dmx.FX_SOLID_PULSE;
+                if (!solid) return;
+                TextView colBtn = pickerButton("Color");
+                setDot(colBtn, h.color);
+                colBtn.setOnClickListener(v -> Pickers.color(this, "Color", h.color, c -> {
+                    h.color = c;
+                    saveHueFrom(h);
+                    setDot(colBtn, c);
+                }));
+                colorBox.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            };
+            fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", app.huebeat.core.Dmx.EFFECTS,
+                    app.huebeat.core.Dmx.EFFECT_CATEGORIES, h.effect, k -> {
+                        h.effect = k;
+                        saveHueFrom(h);
+                        fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
+                        if (title != null && !group) title.setText(hueTitle(h));
+                        showColor.run();
+                    }));
+            showColor.run();
+        }
+        body.addView(Ui.label(this, "Colors"));
+        body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> h.palette, v -> {
+            h.palette = v;
+            saveHueFrom(h);
+        }));
+        body.addView(Ui.label(this, "Brightness"));
+        body.addView(Ui.slider(this, h.brightness, v -> {
+            h.brightness = Math.max(0.02f, v);
+            saveHueFrom(h);
+        }));
+        if (group) {
+            body.addView(Ui.label(this, "Together"));
+            body.addView(Ui.chipRow(this, new String[]{"Spread over the room", "All the same"}, () -> h.together, v -> {
+                h.together = v;
+                saveHueFrom(h);
+            }));
+        }
+    }
+
+    private View hueGroupCard(String name) {
+        List<HueLamp> members = new ArrayList<>();
+        for (HueLamp x : hueList) if (name.equals(x.group)) members.add(x);
+        HueLamp lead = members.get(0);
+        boolean any = false;
+        for (HueLamp m : members) any |= m.enabled;
+        LinearLayout[] c = shell(name + "\n" + members.size() + " lamps · " + (ambientMode()
+                        ? (lead.ambientEffect < 0 ? "Global" : Ambient.NAMES[lead.ambientEffect]) : app.huebeat.core.Dmx.EFFECTS[lead.effect]),
+                "open_huegroup_" + name, () -> groupDialog(name, n -> {
+                    for (HueLamp x : hueList) if (name.equals(x.group)) x.group = n;
+                    saveHue(false);
+                    rebuildHue();
+                }, () -> {
+                    for (HueLamp x : hueList) if (name.equals(x.group)) x.group = "";
+                    saveHue(false);
+                    rebuildHue();
+                }), any, (bv, checked) -> {
+                    for (HueLamp m : members) m.enabled = checked;
+                    saveHue(true);
+                }, null);
+        buildHueBody(c[1], lead, true, null);
+        c[1].addView(section("Members"));
+        for (HueLamp m : members) {
+            LinearLayout row = Ui.row(this);
+            row.addView(Ui.text(this, m.name, 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            Switch ms = new Switch(this);
+            ms.setChecked(m.enabled);
+            ms.setOnCheckedChangeListener((bv, ch) -> {
+                m.enabled = ch;
+                saveHue(true);
+            });
+            row.addView(ms);
+            c[1].addView(row, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 4)));
+        }
+        return c[0];
+    }
+
+    /** Rename or remove a lamp. */
+    private void hueLampDialog(HueLamp h) {
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setText(h.name);
+        field.setSingleLine(true);
+        field.setTextColor(Ui.TEXT);
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        box.addView(field);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Hue lamp")
+                .setView(box)
+                .setPositiveButton("Rename", (d, w) -> {
+                    String n = field.getText().toString().trim();
+                    if (!n.isEmpty()) h.name = n;
+                    saveHue(false);
+                    rebuildHue();
+                })
+                .setNeutralButton("Remove", (d, w) -> {
+                    hueList.remove(h);
+                    saveHue(true);
+                    rebuildHue();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Lists the bridge's lamps that can stream and adds the chosen ones as devices. */
+    private void addHueLamps() {
+        if (!prefs.isPaired()) {
+            startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
+            return;
+        }
+        final String ip = prefs.bridgeIp(), user = prefs.username();
+        android.widget.Toast.makeText(this, "Looking for lamps…", android.widget.Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            List<HueApi.Lamp> found;
+            String err = null;
+            try {
+                found = HueApi.listLamps(ip, user);
+            } catch (Exception e) {
+                found = new ArrayList<>();
+                err = e.getMessage();
+            }
+            final List<HueApi.Lamp> all = found;
+            final String error = err;
+            main.post(() -> {
+                if (isFinishing()) return;
+                java.util.Set<String> have = new java.util.HashSet<>();
+                for (HueLamp h : hueList) have.add(h.entService);
+                List<HueApi.Lamp> fresh = new ArrayList<>();
+                for (HueApi.Lamp l : all) if (!have.contains(l.entService)) fresh.add(l);
+                if (fresh.isEmpty()) {
+                    android.widget.Toast.makeText(this, error != null ? "Couldn't reach the bridge: " + error
+                            : "All lamps that can stream are added already.", android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String[] names = new String[fresh.size()];
+                boolean[] checked = new boolean[fresh.size()];
+                for (int i = 0; i < names.length; i++) {
+                    names[i] = fresh.get(i).name + (fresh.get(i).segments > 1 ? " (gradient)" : "");
+                    checked[i] = true;
+                }
+                new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Add Hue lamps")
+                        .setMultiChoiceItems(names, checked, (d, w, c) -> checked[w] = c)
+                        .setPositiveButton("Add", (d, w) -> {
+                            List<HueApi.Lamp> chosen = new ArrayList<>();
+                            for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(fresh.get(i));
+                            for (int i = 0; i < chosen.size(); i++) {
+                                HueApi.Lamp l = chosen.get(i);
+                                HueLamp h = new HueLamp();
+                                h.name = l.name;
+                                h.lightId = l.lightId;
+                                h.entService = l.entService;
+                                h.segments = l.segments;
+                                if (l.hasPosition) {
+                                    h.x = l.x;
+                                    h.y = l.y;
+                                    h.z = l.z;
+                                    h.x2 = l.x2;
+                                    h.y2 = l.y2;
+                                } else {
+                                    // along the front wall until placed on the room plan
+                                    h.x = chosen.size() == 1 ? 0f : -0.8f + 1.6f * i / (chosen.size() - 1);
+                                    h.y = 0.8f;
+                                    h.x2 = h.x + (h.gradient() ? 0.3f : 0f);
+                                    h.y2 = h.y;
+                                }
+                                hueList.add(h);
+                            }
+                            saveHue(true);
+                            rebuildHue();
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            });
+        }, "hue-lamps").start();
+    }
+
+    /**
+     * Once: the lamps of the old entertainment area become lamp devices, with their places and
+     * their colors from "Just lights".
+     */
+    private void migrateHue() {
+        if (prefs.hueMigrated() || !prefs.isPaired()) return;
+        if (!prefs.isConfigured() || !prefs.hueLamps().isEmpty()) {
+            prefs.setHueMigrated();
+            return;
+        }
+        final String ip = prefs.bridgeIp(), user = prefs.username(), area = prefs.areaId();
+        new Thread(() -> {
+            try {
+                List<HueApi.Lamp> all = HueApi.listLamps(ip, user);
+                List<HueApi.ChannelLight> chLights = HueApi.channelLights(ip, user, area);
+                HueApi.Channels pos = HueApi.channels(ip, user, area);
+                List<HueLamp> out = new ArrayList<>();
+                java.util.Map<String, HueLamp> byLight = new java.util.LinkedHashMap<>();
+                for (int i = 0; i < chLights.size(); i++) {
+                    HueApi.ChannelLight cl = chLights.get(i);
+                    if (cl.lightId == null) continue;
+                    float x = i < pos.x.length ? pos.x[i] : 0f, y = i < pos.y.length ? pos.y[i] : 0f, z = i < pos.z.length ? pos.z[i] : 0f;
+                    HueLamp h = byLight.get(cl.lightId);
+                    if (h == null) {
+                        h = new HueLamp();
+                        h.lightId = cl.lightId;
+                        h.name = cl.name.replaceAll(" \\(\\d+/\\d+\\)$", "");
+                        h.x = h.x2 = x;
+                        h.y = h.y2 = y;
+                        h.z = z;
+                        for (HueApi.Lamp l : all) {
+                            if (cl.lightId.equals(l.lightId)) {
+                                h.entService = l.entService;
+                                h.segments = l.segments;
+                            }
+                        }
+                        Integer col = prefs.lightColors.get(cl.channel);
+                        if (col != null) h.ambientColor = col;
+                        byLight.put(cl.lightId, h);
+                    } else {
+                        h.x2 = x; // gradient lights: the line runs to their last channel
+                        h.y2 = y;
+                    }
+                }
+                for (HueLamp h : byLight.values()) if (!h.entService.isEmpty()) out.add(h);
+                main.post(() -> {
+                    if (prefs.hueLamps().isEmpty()) {
+                        hueList = out;
+                        prefs.saveHueLamps(out);
+                    }
+                    prefs.setHueMigrated();
+                    rebuildHue();
+                });
+            } catch (Exception ignored) {
+                // try again next time
+            }
+        }, "hue-migrate").start();
+    }
+
+    // ---- strip groups
+
+    private View stripGroupCard(String name, android.content.SharedPreferences ui) {
+        List<Strip> members = new ArrayList<>();
+        for (Strip x : stripList) if (name.equals(x.group)) members.add(x);
+        Strip lead = members.get(0);
+        boolean any = false;
+        for (Strip m : members) any |= m.enabled;
+        TextView[] title = new TextView[1];
+        LinearLayout[] c = shell(name + "\n" + members.size() + " strips · " + stripTitle(lead).split("\n")[1].replaceAll("^\\d+ LEDs · ", ""),
+                "open_stripgroup_" + name, () -> groupDialog(name, n -> {
+                    for (Strip x : stripList) if (name.equals(x.group)) x.group = n;
+                    saveStrips();
+                    rebuildStrips();
+                }, () -> {
+                    for (Strip x : stripList) if (name.equals(x.group)) x.group = "";
+                    saveStrips();
+                    rebuildStrips();
+                }), any, (bv, checked) -> {
+                    for (Strip m : members) {
+                        m.enabled = checked;
+                        switchStrip(m, checked);
+                    }
+                    saveStrips();
+                    refresh();
+                }, title);
+        buildStripBody(c[1], lead, title[0]);
+        c[1].addView(section("Members"));
+        for (Strip m : members) {
+            final int mi = stripList.indexOf(m);
+            LinearLayout row = Ui.row(this);
+            row.addView(Ui.text(this, m.name + " · " + m.leds + " LEDs", 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            TextView mg = Ui.text(this, "⚙", 18, Ui.SUB, false);
+            mg.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
+            mg.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
+                    .putExtra(StripSetupActivity.EXTRA_INDEX, mi), REQ_STRIP));
+            row.addView(mg);
+            Switch ms = new Switch(this);
+            ms.setChecked(m.enabled);
+            ms.setOnCheckedChangeListener((bv, ch) -> {
+                m.enabled = ch;
+                saveStrips();
+                switchStrip(m, ch);
+                refresh();
+            });
+            row.addView(ms);
+            c[1].addView(row, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 4)));
+        }
+        return c[0];
+    }
+
+    /** The look controls of a strip card; in a group card they set every member. */
+    private void buildStripBody(LinearLayout body, Strip st, TextView t) {
+        final boolean amb = ambientMode();
+        if (amb) {
+            body.addView(Ui.label(this, "Animation"));
+            TextView animBtn = pickerButton(stripAmbientName(st) + "  ▸");
+            animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
+                    st.ambientEffect + 1, k -> {
+                        st.ambientEffect = k - 1;
+                        saveStripsFrom(st);
+                        animBtn.setText(stripAmbientName(st) + "  ▸");
+                        t.setText(stripTitle(st));
+                    }));
+            body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            TextView colBtn = pickerButton("");
+            Runnable showCol = () -> {
+                colBtn.setText(st.ambientColor < 0 ? "Strip color: global" : "Strip color");
+                setDot(colBtn, st.ambientColor < 0 ? prefs.ambient.color : st.ambientColor);
+            };
+            showCol.run();
+            colBtn.setOnClickListener(v -> Pickers.color(this, "Strip color", st.ambientColor, c -> {
+                st.ambientColor = c;
+                saveStripsFrom(st);
+                showCol.run();
+            }, () -> {
+                st.ambientColor = -1;
+                saveStripsFrom(st);
+                showCol.run();
+            }));
+            body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        } else {
+            body.addView(Ui.label(this, "Effect"));
+            LinearLayout variantBox = Ui.column(this);
+            TextView fxBtn = pickerButton(StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)] + "  ▸");
+            fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", StripEffect.NAMES, StripEffect.CATEGORIES, st.effect, k -> {
+                st.effect = k;
+                st.variant = 0;
+                saveStripsFrom(st);
+                rebuildStrips();
+            }));
+            body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
+            String[] vars = StripEffect.variants(st.effect);
+            if (vars != null && vars.length > 1) {
+                variantBox.addView(Ui.label(this, "Variant"));
+                variantBox.addView(Ui.chipRow(this, vars, () -> st.variant, v -> {
+                    st.variant = v;
+                    saveStripsFrom(st);
+                }));
+            }
+            body.addView(variantBox);
+        }
+        body.addView(Ui.label(this, "Speed"));
+        body.addView(Ui.slider(this, st.speed, v -> {
+            st.speed = v;
+            saveStripsFrom(st);
+        }));
+        body.addView(Ui.label(this, "Blur"));
+        body.addView(Ui.slider(this, st.blur, v -> {
+            st.blur = v;
+            saveStripsFrom(st);
+        }));
+        body.addView(Ui.label(this, "Colors"));
+        body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> st.palette, v -> {
+            st.palette = v;
+            saveStripsFrom(st);
+        }));
+        body.addView(Ui.label(this, "Brightness"));
+        android.widget.SeekBar ownBright = Ui.slider(this, st.brightness, v -> {
+            st.brightness = Math.max(0.03f, v);
+            saveStripsFrom(st);
+        });
+        TextView brightHint = Ui.text(this, "", 13, Ui.SUB, false);
+        Runnable showBright = () -> {
+            ownBright.setVisibility(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS ? View.GONE : View.VISIBLE);
+            String lightsSlider = amb ? "the Brightness slider under Lights" : "Max brightness under Look";
+            brightHint.setText(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_OWN
+                    ? "Only this slider sets the strip's brightness."
+                    : st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS
+                    ? "The strip follows " + lightsSlider + "."
+                    : "This slider and " + lightsSlider + " both dim the strip.");
+        };
+        body.addView(Ui.chipRow(this, new String[]{"Own + lights", "Own only", "Follow lights"}, () -> st.brightnessMode, v -> {
+            st.brightnessMode = v;
+            saveStripsFrom(st);
+            showBright.run();
+        }));
+        body.addView(brightHint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 6), 0, 0));
+        body.addView(ownBright);
+        showBright.run();
+
+        if (!amb) {
+        body.addView(Ui.label(this, "Strobe overlay"));
+        TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
+        body.addView(sh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        LinearLayout strobeBox = Ui.column(this);
+        body.addView(Ui.chipRow(this, StripEffect.STROBE_TRIGGERS, () -> st.strobeTrigger, v -> {
+            st.strobeTrigger = v;
+            saveStripsFrom(st);
+            strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+        }));
+        strobeBox.addView(Ui.label(this, "Strobe color"));
+        android.graphics.drawable.Drawable[] strobeIcons = new android.graphics.drawable.Drawable[STROBE_COLORS.length];
+        for (int k = 0; k < STROBE_COLORS.length; k++) strobeIcons[k] = Pickers.dot(this, STROBE_COLORS[k], 14);
+        strobeBox.addView(Ui.chipRow(this, STROBE_COLOR_NAMES, strobeIcons, () -> strobeColorIndex(st.strobeColor), v -> {
+            st.strobeColor = STROBE_COLORS[v];
+            saveStripsFrom(st);
+        }));
+        strobeBox.addView(Ui.label(this, "Flash length"));
+        strobeBox.addView(Ui.slider(this, st.strobeLength, v -> {
+            st.strobeLength = v;
+            saveStripsFrom(st);
+        }));
+        strobeBox.addView(Ui.label(this, "Flash strength"));
+        strobeBox.addView(Ui.slider(this, st.strobeAmount, v -> {
+            st.strobeAmount = Math.max(0.1f, v);
+            saveStripsFrom(st);
+        }));
+        strobeBox.addView(Ui.label(this, "Where it flashes"));
+        strobeBox.addView(Ui.chipRow(this, StripEffect.STROBE_COVERS, () -> st.strobeCover, v -> {
+            st.strobeCover = v;
+            saveStripsFrom(st);
+        }));
+        TextView warn = Ui.text(this, "Fast flashing lights can trigger seizures in people with photosensitive epilepsy.", 12, Ui.SUB, false);
+        strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        strobeBox.setVisibility(st.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
+        body.addView(strobeBox);
+        }
+    }
+
+    /** Saves the strips; a grouped strip passes its look on to the rest of its group. */
+    private void saveStripsFrom(Strip st) {
+        if (!st.group.isEmpty()) {
+            for (Strip o : stripList) if (o != st && st.group.equals(o.group)) o.copyLookFrom(st);
+        }
+        saveStrips();
+    }
+
     private void rebuildStrips() {
         if (stripsBox == null) return;
         stripsBox.removeAllViews();
         stripList = prefs.strips();
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
+        java.util.Set<String> shownStripGroups = new java.util.HashSet<>();
         for (int i = 0; i < stripList.size(); i++) {
             final int idx = i;
             final Strip st = stripList.get(i);
+            if (!st.group.isEmpty()) {
+                if (shownStripGroups.add(st.group)) stripsBox.addView(stripGroupCard(st.group, ui), Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
+                continue;
+            }
             LinearLayout card = Ui.column(this);
             card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
             int p = Ui.dp(this, 14);
@@ -628,131 +1197,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 chev.setText(o ? "▾" : "▸");
                 ui.edit().putBoolean(key, o).apply();
             });
-            final boolean amb = ambientMode();
-            if (amb) {
-                body.addView(Ui.label(this, "Animation"));
-                TextView animBtn = pickerButton(stripAmbientName(st) + "  ▸");
-                animBtn.setOnClickListener(v -> Pickers.effect(this, "Animation", withSame(Ambient.NAMES), withSameCat(Ambient.CATEGORIES),
-                        st.ambientEffect + 1, k -> {
-                            st.ambientEffect = k - 1;
-                            saveStrips();
-                            animBtn.setText(stripAmbientName(st) + "  ▸");
-                            t.setText(stripTitle(st));
-                        }));
-                body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
-                TextView colBtn = pickerButton("");
-                Runnable showCol = () -> {
-                    colBtn.setText(st.ambientColor < 0 ? "Strip color: same as lights" : "Strip color");
-                    setDot(colBtn, st.ambientColor < 0 ? prefs.ambient.color : st.ambientColor);
-                };
-                showCol.run();
-                colBtn.setOnClickListener(v -> Pickers.color(this, "Strip color", st.ambientColor, c -> {
-                    st.ambientColor = c;
-                    saveStrips();
-                    showCol.run();
-                }, () -> {
-                    st.ambientColor = -1;
-                    saveStrips();
-                    showCol.run();
-                }));
-                body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-            } else {
-                body.addView(Ui.label(this, "Effect"));
-                LinearLayout variantBox = Ui.column(this);
-                TextView fxBtn = pickerButton(StripEffect.NAMES[Math.min(st.effect, StripEffect.NAMES.length - 1)] + "  ▸");
-                fxBtn.setOnClickListener(v -> Pickers.effect(this, "Effect", StripEffect.NAMES, StripEffect.CATEGORIES, st.effect, k -> {
-                    st.effect = k;
-                    st.variant = 0;
-                    saveStrips();
-                    rebuildStrips();
-                }));
-                body.addView(fxBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
-                String[] vars = StripEffect.variants(st.effect);
-                if (vars != null && vars.length > 1) {
-                    variantBox.addView(Ui.label(this, "Variant"));
-                    variantBox.addView(Ui.chipRow(this, vars, () -> st.variant, v -> {
-                        st.variant = v;
-                        saveStrips();
-                    }));
-                }
-                body.addView(variantBox);
-            }
-            body.addView(Ui.label(this, "Speed"));
-            body.addView(Ui.slider(this, st.speed, v -> {
-                st.speed = v;
-                saveStrips();
-            }));
-            body.addView(Ui.label(this, "Blur"));
-            body.addView(Ui.slider(this, st.blur, v -> {
-                st.blur = v;
-                saveStrips();
-            }));
-            body.addView(Ui.label(this, "Colors"));
-            body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> st.palette, v -> {
-                st.palette = v;
-                saveStrips();
-            }));
-            body.addView(Ui.label(this, "Brightness"));
-            android.widget.SeekBar ownBright = Ui.slider(this, st.brightness, v -> {
-                st.brightness = Math.max(0.03f, v);
-                saveStrips();
-            });
-            TextView brightHint = Ui.text(this, "", 13, Ui.SUB, false);
-            Runnable showBright = () -> {
-                ownBright.setVisibility(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS ? View.GONE : View.VISIBLE);
-                String lightsSlider = amb ? "the Brightness slider under Lights" : "Max brightness under Look";
-                brightHint.setText(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_OWN
-                        ? "Only this slider sets the strip's brightness."
-                        : st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS
-                        ? "The strip follows " + lightsSlider + "."
-                        : "This slider and " + lightsSlider + " both dim the strip.");
-            };
-            body.addView(Ui.chipRow(this, new String[]{"Own + lights", "Own only", "Follow lights"}, () -> st.brightnessMode, v -> {
-                st.brightnessMode = v;
-                saveStrips();
-                showBright.run();
-            }));
-            body.addView(brightHint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 6), 0, 0));
-            body.addView(ownBright);
-            showBright.run();
-
-            if (!amb) {
-            body.addView(Ui.label(this, "Strobe overlay"));
-            TextView sh = Ui.text(this, "Flashes in its own color on top of the effect, which keeps showing the music underneath.", 13, Ui.SUB, false);
-            body.addView(sh, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
-            LinearLayout strobeBox = Ui.column(this);
-            body.addView(Ui.chipRow(this, StripEffect.STROBE_TRIGGERS, () -> st.strobeTrigger, v -> {
-                st.strobeTrigger = v;
-                saveStrips();
-                strobeBox.setVisibility(v == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
-            }));
-            strobeBox.addView(Ui.label(this, "Strobe color"));
-            android.graphics.drawable.Drawable[] strobeIcons = new android.graphics.drawable.Drawable[STROBE_COLORS.length];
-            for (int k = 0; k < STROBE_COLORS.length; k++) strobeIcons[k] = Pickers.dot(this, STROBE_COLORS[k], 14);
-            strobeBox.addView(Ui.chipRow(this, STROBE_COLOR_NAMES, strobeIcons, () -> strobeColorIndex(st.strobeColor), v -> {
-                st.strobeColor = STROBE_COLORS[v];
-                saveStrips();
-            }));
-            strobeBox.addView(Ui.label(this, "Flash length"));
-            strobeBox.addView(Ui.slider(this, st.strobeLength, v -> {
-                st.strobeLength = v;
-                saveStrips();
-            }));
-            strobeBox.addView(Ui.label(this, "Flash strength"));
-            strobeBox.addView(Ui.slider(this, st.strobeAmount, v -> {
-                st.strobeAmount = Math.max(0.1f, v);
-                saveStrips();
-            }));
-            strobeBox.addView(Ui.label(this, "Where it flashes"));
-            strobeBox.addView(Ui.chipRow(this, StripEffect.STROBE_COVERS, () -> st.strobeCover, v -> {
-                st.strobeCover = v;
-                saveStrips();
-            }));
-            TextView warn = Ui.text(this, "Fast flashing lights can trigger seizures in people with photosensitive epilepsy.", 12, Ui.SUB, false);
-            strobeBox.addView(warn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-            strobeBox.setVisibility(st.strobeTrigger == StripEffect.STROBE_OFF ? View.GONE : View.VISIBLE);
-            body.addView(strobeBox);
-            }
+            buildStripBody(body, st, t);
             card.addView(body);
 
             stripsBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
@@ -760,6 +1205,29 @@ public class MainActivity extends Activity implements SyncState.Listener {
         TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
         add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
         stripsBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+        int loose = 0;
+        for (Strip x : stripList) if (x.group.isEmpty()) loose++;
+        if (loose >= 2) {
+            TextView grp = Ui.button(this, "+ Group strips", false);
+            grp.setOnClickListener(v -> {
+                List<Strip> free = new ArrayList<>();
+                for (Strip x : stripList) if (x.group.isEmpty()) free.add(x);
+                String[] names = new String[free.size()];
+                for (int i = 0; i < names.length; i++) names[i] = free.get(i).name + " (" + free.get(i).leds + " LEDs)";
+                pickMembers("Group strips", "Group name, e.g. Shelf", names, (chosen, name) -> {
+                    String g = name.isEmpty() ? "Strips" : name;
+                    for (Strip o : stripList) if (g.equals(o.group)) g = g + " 2";
+                    Strip lead = free.get(chosen.get(0));
+                    for (int k : chosen) {
+                        free.get(k).group = g;
+                        if (free.get(k) != lead) free.get(k).copyLookFrom(lead);
+                    }
+                    saveStrips();
+                    rebuildStrips();
+                });
+            });
+            stripsBox.addView(grp, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        }
     }
 
     /** Turning a strip off in the app turns the LEDs off too; turning it on wakes a WLED controller. */
@@ -805,7 +1273,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             if (colors) {
                 TextView colBtn = pickerButton("");
                 Runnable showCol = () -> {
-                    colBtn.setText(d.ambientColor < 0 ? "Light color: same as lights" : "Light color");
+                    colBtn.setText(d.ambientColor < 0 ? "Light color: global" : "Light color");
                     setDot(colBtn, d.ambientColor < 0 ? prefs.ambient.color : d.ambientColor);
                 };
                 showCol.run();
@@ -860,13 +1328,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
             d.brightness = Math.max(0.02f, v);
             saveDmxFrom(d);
         }));
-        if (!group) {
-            body.addView(Ui.label(this, "Place in the room (left … right)"));
-            body.addView(Ui.slider(this, (d.x + 1f) / 2f, v -> {
-                d.x = v * 2f - 1f;
-                saveDmxFrom(d);
-            }));
-        }
         if (app.huebeat.core.Dmx.moves(d.roles)) {
             body.addView(Ui.label(this, "Movement"));
             body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.MOVES, () -> d.movement, v -> {
@@ -988,11 +1449,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
             });
             mh.addView(ms);
             mc.addView(mh);
-            mc.addView(Ui.label(this, "Place in the room (left … right)"));
-            mc.addView(Ui.slider(this, (m.x + 1f) / 2f, v -> {
-                m.x = v * 2f - 1f;
-                prefs.saveDmx(dmxList);
-            }));
             if (moves) {
                 mc.addView(Ui.label(this, "Aim: pan"));
                 mc.addView(Ui.slider(this, m.panCenter, v -> {
@@ -1171,11 +1627,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
     }
 
     private String dmxAmbientName(DmxLight d) {
-        return d.ambientEffect < 0 ? "Same as lights" : Ambient.NAMES[Math.min(d.ambientEffect, Ambient.NAMES.length - 1)];
+        return d.ambientEffect < 0 ? "Global" : Ambient.NAMES[Math.min(d.ambientEffect, Ambient.NAMES.length - 1)];
     }
 
     private String stripAmbientName(Strip st) {
-        return st.ambientEffect < 0 ? "Same as lights" : Ambient.NAMES[Math.min(st.ambientEffect, Ambient.NAMES.length - 1)];
+        return st.ambientEffect < 0 ? "Global" : Ambient.NAMES[Math.min(st.ambientEffect, Ambient.NAMES.length - 1)];
     }
 
     private String stripTitle(Strip st) {
@@ -1251,12 +1707,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     /**
      * A palette row with color previews: custom palettes can be edited with a long press and
-     * "+ New" makes one. With {@code withSame}, the first chip is "Same as lights" (value -1).
+     * "+ New" makes one. With {@code withSame}, the first chip is "Global" (value -1).
      */
     private View paletteRow(boolean withSame, int samePalette, Ui.IntGet get, Ui.IntSet set) {
         final int off = withSame ? 1 : 0;
         String[] names = new String[Palettes.count() + off];
-        if (withSame) names[0] = "Same as lights";
+        if (withSame) names[0] = "Global";
         for (int k = 0; k < Palettes.count(); k++) names[k + off] = Palettes.name(k);
         android.graphics.drawable.Drawable[] icons = paletteSwatches(off);
         if (withSame) icons[0] = swatch(samePalette);
@@ -1297,6 +1753,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         List<Strip> list = prefs.strips();
         for (Strip st : list) if (st.palette >= 0) st.palette = shiftPalette(st.palette, d, -1);
         prefs.saveStrips(list);
+        List<HueLamp> hl = prefs.hueLamps();
+        for (HueLamp x : hl) if (x.palette >= 0) x.palette = shiftPalette(x.palette, d, -1);
+        prefs.saveHueLamps(hl);
         List<DmxLight> dl = prefs.dmxLights();
         for (DmxLight x : dl) if (x.palette >= 0) x.palette = shiftPalette(x.palette, d, -1);
         prefs.saveDmx(dl);
@@ -1336,10 +1795,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         musicTop.setVisibility(amb ? View.GONE : View.VISIBLE);
         musicLook.setVisibility(amb ? View.GONE : View.VISIBLE);
         ambientLook.setVisibility(amb ? View.VISIBLE : View.GONE);
-        if (amb) {
-            lampBox.setVisibility(prefs.ambient.animation == Ambient.STATIC ? View.VISIBLE : View.GONE);
-            rebuildLamps();
-        }
+
         for (int i = 0; i < modeChips.size(); i++) Ui.setChipSelected(modeChips.get(i), i == mode);
         for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), LightSettings.STYLE_ORDER[i] == prefs.light.style);
         boolean screenCols = prefs.light.screenColors;
@@ -1385,11 +1841,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 break;
             default:
                 status.setTextColor(Ui.SUB);
-                status.setText(!prefs.hasOutputs() ? "Tap to connect your Hue bridge"
+                status.setText(!prefs.hasOutputs() ? (prefs.isPaired() ? "Tap to add your Hue lamps" : "Tap to connect your Hue bridge")
                         : amb ? "Tap to turn your lights on" : "Tap to sync your lights");
                 hint.setText("");
         }
-        footer.setText(prefs.isConfigured() ? prefs.bridgeName() + " · " + prefs.areaName() : "No Hue bridge connected");
+        footer.setText(prefs.isPaired() ? prefs.bridgeName() : "No Hue bridge connected");
         if (SyncState.status == SyncState.Status.RUNNING && !amb) {
             // update BPM text a few times per second while running
             main.removeCallbacks(bpmTicker);
@@ -1452,7 +1908,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private void startFlow() {
         if (!prefs.hasOutputs()) {
-            startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
+            // a bridge without lamps yet: pick them; otherwise connect a bridge first
+            if (prefs.isPaired() && prefs.hueLamps().isEmpty()) addHueLamps();
+            else startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
             return;
         }
         if (ambientMode()) {
@@ -1548,10 +2006,15 @@ public class MainActivity extends Activity implements SyncState.Listener {
             if (pendingStart && resultCode == RESULT_OK) startFlow();
             pendingStart = false;
         } else if (requestCode == REQ_SETUP) {
-            String oldArea = data != null ? data.getStringExtra(SetupActivity.EXTRA_OLD_AREA) : null;
-            if (resultCode == RESULT_OK && oldArea != null) onAreaChanged(oldArea);
-            shownNames = null;
+            if (resultCode == RESULT_OK) {
+                migrateHue();
+                if (prefs.hueLamps().isEmpty()) addHueLamps();
+            }
             refresh();
+        } else if (requestCode == REQ_ROOM) {
+            rebuildHue();
+            rebuildStrips();
+            rebuildDmx();
         } else if (requestCode == REQ_DMX) {
             rebuildDmx();
             refresh();
@@ -1572,6 +2035,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             rebuildPalettes();
             rebuildAmbientPalettes();
             rebuildDmx();
+            rebuildHue();
             rebuildStrips();
             refresh();
         }

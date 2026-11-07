@@ -41,7 +41,7 @@ final class Pickers {
 
     /** With {@code same}, the dialog offers "Same as lights" (and {@code initial} < 0 means that is chosen). */
     static void color(Activity a, String title, int initial, ColorSet set, Runnable same) {
-        color(a, title, initial, set, same, "Same as lights");
+        color(a, title, initial, set, same, "Global");
     }
 
     static void color(Activity a, String title, int initial, ColorSet set, Runnable same, String sameLabel) {

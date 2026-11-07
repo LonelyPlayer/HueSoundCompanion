@@ -13,7 +13,7 @@ public final class StripEffect {
     public static final int LIGHTS = 0, EQUALIZER = 1, SPECTRUM = 2, SCROLL = 3, ENERGY = 4,
             FIREWORKS = 5, RAIN = 6, FIRE = 7;
     /** This app's own effects (ids 0..7); LedFx ports follow from {@link #LEDFX_BASE}. */
-    private static final String[] OWN = {"Like the lights", "Equalizer Peaks", "Spectrum Glow", "Flow", "Energy Bars",
+    private static final String[] OWN = {"Global look", "Equalizer Peaks", "Spectrum Glow", "Flow", "Energy Bars",
             "Fireworks", "Drops", "Campfire"};
     public static final int LEDFX_BASE = 8;
     /** All effect names by id. */

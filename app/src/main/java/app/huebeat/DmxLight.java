@@ -16,6 +16,8 @@ final class DmxLight {
     int preset = 0;
     int[] roles = Dmx.PRESETS[0].roles.clone();
     float x = 0f;            // -1 left .. 1 right
+    float y = 0.5f;          // -1 back .. 1 front
+    float z = 0f;            // -1 floor .. 1 ceiling
     float brightness = 1f;
     boolean enabled = true;
     float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
@@ -37,7 +39,7 @@ final class DmxLight {
         JSONArray r = new JSONArray();
         for (int v : roles) r.put(v);
         return new JSONObject().put("name", name).put("ip", ip).put("protocol", protocol).put("universe", universe)
-                .put("address", address).put("preset", preset).put("roles", r).put("x", (double) x)
+                .put("address", address).put("preset", preset).put("roles", r).put("x", (double) x).put("y", (double) y).put("z", (double) z)
                 .put("brightness", (double) brightness).put("enabled", enabled)
                 .put("pan", (double) panCenter).put("tilt", (double) tiltCenter).put("move", (double) move)
                 .put("strobe", strobeMode).put("effect", effect).put("palette", palette).put("color", color)
@@ -61,6 +63,8 @@ final class DmxLight {
             d.roles = Dmx.PRESETS[d.preset].roles.clone();
         }
         d.x = (float) o.optDouble("x", 0.0);
+        d.y = (float) o.optDouble("y", 0.5);
+        d.z = (float) o.optDouble("z", 0.0);
         d.brightness = (float) o.optDouble("brightness", 1.0);
         d.enabled = o.optBoolean("enabled", true);
         d.panCenter = (float) o.optDouble("pan", 0.5);
