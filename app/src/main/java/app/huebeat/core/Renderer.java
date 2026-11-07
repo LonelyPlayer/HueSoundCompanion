@@ -12,6 +12,18 @@ public final class Renderer {
     private final float[] target, out;
     private final float[] tmp = new float[3];
     private final Random random = new Random();
+    /** The devices behind the points (null: every point is its own). */
+    private volatile Devices devices;
+
+    public void setDevices(Devices d) {
+        devices = d;
+    }
+
+    /** A random point, fair per device (a long strip doesn't win more often than a lamp). */
+    private int pick() {
+        Devices d = devices;
+        return d != null && d.of.length == n ? d.randomPoint(random) : random.nextInt(n);
+    }
 
     private boolean initialized = false;
     private int lastBeat, lastSnare, beatIndex;
@@ -201,7 +213,7 @@ public final class Renderer {
             for (int i = 0; i < n; i++) env[i] = Math.max(env[i], strength * (0.8f + 0.2f * (i % 2)));
         }
         if (snare && inten > 0.2f && n > 0) {
-            int i = random.nextInt(n);
+            int i = pick();
             sparkle[i] = Math.max(sparkle[i], 0.25f + 0.5f * inten);
         }
         float tau = lerp(Math.max(0.25f, period * 0.9f), 0.06f, (float) Math.pow(inten, 0.8));
@@ -251,7 +263,7 @@ public final class Renderer {
             }
         }
         if (snare && inten > 0.2f && n > 0) {
-            int i = random.nextInt(n);
+            int i = pick();
             sparkle[i] = Math.max(sparkle[i], 0.3f + 0.6f * inten);
         }
         float tau = lerp(Math.max(0.25f, period * 0.9f), 0.06f, (float) Math.pow(inten, 0.8));
@@ -320,7 +332,7 @@ public final class Renderer {
             if (s.strobe && inten > 0.5f) {
                 strobe = 1f;
             } else if (n > 0) {
-                int i = random.nextInt(n);
+                int i = pick();
                 sparkle[i] = 0.9f;
             }
         }

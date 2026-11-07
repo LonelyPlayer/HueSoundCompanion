@@ -215,6 +215,23 @@ final class Rig {
             z[i] = pts.get(i)[2];
         }
         scene = new Scene(x, y, z, flow);
+        // every lamp, strip and DMX light is one device (a strip has many points, a lamp one or a few)
+        int nd = lamps.size() + strips.size() + dmxCfg.size();
+        int[] ds = new int[nd], dl = new int[nd];
+        int dq = 0;
+        for (int k = 0; k < lamps.size(); k++, dq++) {
+            ds[dq] = lampOff[k];
+            dl[dq] = lamps.get(k).points().length;
+        }
+        for (int k = 0; k < strips.size(); k++, dq++) {
+            ds[dq] = stripOff[k];
+            dl[dq] = strips.get(k).segments;
+        }
+        for (int k = 0; k < dmxCfg.size(); k++, dq++) {
+            ds[dq] = dmxOff[k];
+            dl[dq] = 1;
+        }
+        scene.setDevices(new app.huebeat.core.Devices(ds, dl, n));
         lookIdx.clear();
 
         // Hue lamps: one look per lamp, or one per group over all its members

@@ -64,6 +64,22 @@ public final class Ambient {
     private float rainbowHue;
     private int pixel;
     private float pixelTimer;
+    /** The devices behind the points (the room's scene); null for a single strip. */
+    private Devices devices;
+    private int[] devOrder;
+    private boolean[] stormHit;
+
+    /** Random picks and moving pixels then go device by device, so every light gets its turn. */
+    public void setDevices(Devices d) {
+        if (d == null || d.of.length != n || strip) return;
+        devices = d;
+        Integer[] o = new Integer[d.count()];
+        for (int k = 0; k < o.length; k++) o[k] = k;
+        java.util.Arrays.sort(o, (a, b) -> Float.compare(pos[d.start[a]], pos[d.start[b]])); // along the flow
+        devOrder = new int[o.length];
+        for (int k = 0; k < o.length; k++) devOrder[k] = o[k];
+        stormHit = new boolean[o.length];
+    }
 
     /** @param positions position of every output along the line, 0..1 */
     public Ambient(float[] positions, boolean strip) {
@@ -155,13 +171,33 @@ public final class Ambient {
                     float f = (float) (1 - since / 0.5);
                     for (int i = hitStart; i < hitStart + hitLen && i < n; i++) rgb(i, s.color, f);
                 } else if (rnd.nextFloat() < 1 - Math.pow(1 - 0.1 * 5, dt * sp)) {
-                    hitLen = Math.max(1, Math.round(n * 0.1f));
-                    hitStart = rnd.nextInt(Math.max(1, n - hitLen + 1));
+                    if (devices != null && devices.count() > 0) {
+                        // one light at random; a strip flashes a piece of itself
+                        int d = rnd.nextInt(devices.count()), len = devices.len[d];
+                        hitLen = len <= 8 ? len : Math.max(1, Math.round(len * 0.1f));
+                        hitStart = devices.start[d] + rnd.nextInt(len - hitLen + 1);
+                    } else {
+                        hitLen = Math.max(1, Math.round(n * 0.1f));
+                        hitStart = rnd.nextInt(Math.max(1, n - hitLen + 1));
+                    }
                     hitTime = t;
                 }
                 return scale(s.brightness);
             }
             case PIXELS: {
+                if (devices != null && devices.count() > 0) {
+                    // one light after the other along the flow; on a strip the pixel runs along it
+                    pixelTimer += dt * sp;
+                    if (pixelTimer >= 1f) {
+                        pixelTimer -= (float) Math.floor(pixelTimer);
+                        pixel = (pixel + 1) % devOrder.length;
+                    }
+                    int d = devOrder[Math.min(pixel, devOrder.length - 1)], len = devices.len[d];
+                    java.util.Arrays.fill(out, 0f);
+                    rgb(devices.start[d] + Math.min(len - 1, (int) (pixelTimer * len)), s.color, 1f);
+                    if (len <= 8) for (int i = 0; i < len; i++) rgb(devices.start[d] + i, s.color, 1f);
+                    return scale(s.brightness);
+                }
                 pixelTimer += dt * sp;
                 if (pixelTimer >= (strip ? 0.05f : 1f)) {
                     pixelTimer = 0;
@@ -257,6 +293,12 @@ public final class Ambient {
                     stormNext = 0;
                     hitStart = rnd.nextInt(n);
                     hitLen = strip ? Math.max(1, n / 3) : Math.max(1, n / 2 + rnd.nextInt(n / 2 + 1));
+                    if (devices != null && devices.count() > 0) {
+                        // about half the lights get the full strike, at least one
+                        boolean any = false;
+                        for (int k = 0; k < stormHit.length; k++) any |= (stormHit[k] = rnd.nextBoolean());
+                        if (!any) stormHit[rnd.nextInt(stormHit.length)] = true;
+                    }
                 }
                 if (stormStrikes > 0 && stormNext <= 0) {
                     stormFlash = 0.7f + 0.3f * rnd.nextFloat();
@@ -271,7 +313,8 @@ public final class Ambient {
                     out[3 * i + 2] = 0.35f * base * 6;
                     int d = Math.abs(i - hitStart);
                     if (d < hitLen || !strip) {
-                        float f = stormFlash * (strip ? 1f - (float) d / hitLen : (d <= hitLen ? 1f : 0.5f));
+                        float f = stormFlash * (strip ? 1f - (float) d / hitLen
+                                : devices != null ? (stormHit[devices.of[i]] ? 1f : 0.5f) : (d <= hitLen ? 1f : 0.5f));
                         out[3 * i] += 0.85f * f;
                         out[3 * i + 1] += 0.9f * f;
                         out[3 * i + 2] += 1f * f;

@@ -25,6 +25,12 @@ public final class Scene {
         last = new float[3 * Math.max(1, n)];
     }
 
+    /** Which points belong to which light, so random effects treat every light alike. */
+    public void setDevices(Devices d) {
+        renderer.setDevices(d);
+        ambient.setDevices(d);
+    }
+
     /** Music frame: rgb (0..1) per point. */
     public float[] render(Features f, double t, float dt, LightSettings s) {
         last = renderer.render(f, t, dt, s);
