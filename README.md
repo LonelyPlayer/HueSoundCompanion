@@ -31,10 +31,10 @@ Music sync for Philips Hue and LED strips that listens to **everything your phon
   - **Keep the colors when turned off:** when you stop, the last colors are written to the lamps (normal Hue API) and to WLED strips, so the light stays as it is.
 - **One room, all devices.** Hue lamps, LED strips and DMX lights are devices of the same kind:
   - **Global look**: the Look (music) and Lights (just lights) settings are global; every device follows it ("Global") or has its own look (own style, solid color pulsing/steady, own palette, own animation and color).
-  - **Hue lamps as devices**: add single lamps from the bridge ("+ Add Hue lamps"); the app keeps its own entertainment configuration on the bridge with exactly these lamps and their places (Hue's limit: 10 lamps streaming at once). Entertainment areas are no longer chosen in the app; an old area is converted automatically (lamps, places, colors).
+  - **Hue lamps as devices**: add single lamps from the bridge ("+ Add light" › Hue lamp); the app keeps its own entertainment configuration on the bridge with exactly these lamps and their places (Hue's limit: 10 lamps streaming at once). Entertainment areas are no longer chosen in the app; an old area is converted automatically (lamps, places, colors).
   - **Room plan**: every device on a floor plan (top = front/TV); drag lamps and DMX lights, and both ends of every strip. Hue lamps start at the places Hue already knows.
   - **Direction**: effects run left → right, front → back, around the room or from the center. One scene over every point of every device: Hue, strips and DMX move together, in space and time.
-  - **Groups for every device type** (Hue lamps, strips, DMX lights): a group shares one look; with its own look it is spread over its members' places (like a Hue entertainment area), or all members show the same.
+  - **Groups for every device type** (Hue lamps, strips, DMX lights): the chain symbol next to ⚙ on a light starts a new group or adds the light to an existing one of its kind (the broken chain takes it out again). A group shares one look; with its own look it is spread over its members' places (like a Hue entertainment area), or all members show the same.
 - **Shuffle** style: an automatic light director. It estimates the vibe (loudness against the song's peak, drum strength, tempo, brightness of the sound, major/minor) and picks style, palette (palettes are measured by warmth and vividness, custom ones included), intensity, color movement, an effect/variant/blur for every strip and the DMX movement. It changes the look instantly on a drop's first hit or when the bass drops out, on the next beat when the sound color changes, and otherwise after 32-beat phrases. "Shuffle now" forces a new look.
 - **Build-ups & drops** (on by default, works with every style): a build-up is detected from the trend over ~4 s (sound getting brighter, hits coming faster, getting louder; two signs needed). The lights get brighter and whiter, flash on every roll hit and strips fill from both ends like a loading bar; the gap before the drop goes black and the drop lands as a white impact.
 - **DMX lights via Art-Net / sACN** (e.g. Showtec NET-2/3 Pocket): the app finds Art-Net nodes (ArtPoll), shows their ports and universes, can set the universes remotely (ArtAddress, if the node accepts it) or open the node's settings page. DMX lights follow the same styles, palettes and Just-lights animations as the lamps.
@@ -60,8 +60,8 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## First start
 
-1. Under **Hue lamps** tap **+ Add Hue lamps**. The screen shows the bridges on your Wi-Fi (or type the IP); tap yours and press the round link button on the bridge.
-2. Below, tick the lamps that should play along and tap **Add**. The ⚙ on a lamp card opens the same screen to rename, blink or remove it, or to switch to another bridge. LED strips and DMX lights are added the same way in their sections.
+1. Under **Lights** tap **+ Add light** and choose **Hue lamp**. The screen shows the bridges on your Wi-Fi (or type the IP); tap yours and press the round link button on the bridge.
+2. Below, tick the lamps that should play along and tap **Add**. The ⚙ on a lamp card opens the same screen to rename, blink or remove it, or to switch to another bridge. LED strips and DMX lights are added with the same button.
 3. Place the lights on the **room plan**.
 4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; LightBox records nothing and keeps no audio, it only measures it.
 

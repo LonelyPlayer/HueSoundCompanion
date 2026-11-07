@@ -251,19 +251,19 @@ public class MainActivity extends Activity implements SyncState.Listener {
         root.addView(ambientLook);
         buildAmbient(collapsible(ambientLook, "Global look", "open_ambient", true));
 
-        LinearLayout hueSection = collapsible(root, "Hue lamps", "open_hue", true);
+        // all devices in one list, one button to add any kind
+        LinearLayout lights = collapsible(root, "Lights", "open_devices", true);
         hueBox = Ui.column(this);
-        hueSection.addView(hueBox);
-        rebuildHue();
-
-        LinearLayout stripsSection = collapsible(root, "LED strips", "open_strips", true);
+        lights.addView(hueBox);
         stripsBox = Ui.column(this);
-        stripsSection.addView(stripsBox);
-        rebuildStrips();
-
-        LinearLayout dmxSection = collapsible(root, "DMX lights", "open_dmx", true);
+        lights.addView(stripsBox);
         dmxBox = Ui.column(this);
-        dmxSection.addView(dmxBox);
+        lights.addView(dmxBox);
+        TextView addLight = Ui.button(this, "+ Add light", false);
+        addLight.setOnClickListener(v -> addDeviceDialog());
+        lights.addView(addLight, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 12), 0, 0));
+        rebuildHue();
+        rebuildStrips();
         rebuildDmx();
 
         delayLabel = section("Light delay");
@@ -482,6 +482,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
     /** A collapsible device/group card: header (title, gear, switch) and a body. */
     private LinearLayout[] shell(String titleText, String key, Runnable gear, boolean on,
                                  android.widget.CompoundButton.OnCheckedChangeListener sw, TextView[] titleOut) {
+        return shell(titleText, key, null, gear, on, sw, titleOut);
+    }
+
+    private LinearLayout[] shell(String titleText, String key, Runnable link, Runnable gear, boolean on,
+                                 android.widget.CompoundButton.OnCheckedChangeListener sw, TextView[] titleOut) {
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
         LinearLayout card = Ui.column(this);
         card.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 16)));
@@ -495,6 +500,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         t.setLineSpacing(0, 1.15f);
         head.addView(t, Ui.lp(0, Ui.WRAP, 1));
         if (titleOut != null) titleOut[0] = t;
+        if (link != null) head.addView(linkIcon(false, link));
         if (gear != null) {
             TextView g = Ui.text(this, "⚙", 20, Ui.SUB, false);
             g.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
@@ -521,46 +527,191 @@ public class MainActivity extends Activity implements SyncState.Listener {
         return new LinearLayout[]{card, body};
     }
 
-    interface MembersPicked {
-        void picked(List<Integer> chosen, String name);
+    /** The chain icon in a device header: link (into a group) or unlink (out of its group). */
+    private View linkIcon(boolean unlink, Runnable action) {
+        LinkIcon v = new LinkIcon(this, unlink);
+        v.setLayoutParams(Ui.lp(Ui.dp(this, 38), Ui.dp(this, 34)));
+        v.setClickable(true);
+        v.setOnClickListener(x -> action.run());
+        return v;
     }
 
-    /** Pick two or more devices and name the group. */
-    private void pickMembers(String title, String hint, String[] names, MembersPicked done) {
-        boolean[] checked = new boolean[names.length];
+    private View iconGear(Runnable action) {
+        TextView g = Ui.text(this, "⚙", 18, Ui.SUB, false);
+        g.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
+        g.setContentDescription("Settings");
+        g.setOnClickListener(v -> action.run());
+        return g;
+    }
+
+    /** A name not used by another group in {@code taken}. */
+    private static String freeName(String want, java.util.Collection<String> taken) {
+        String g = want;
+        for (int n = 2; taken.contains(g); n++) g = want + " " + n;
+        return g;
+    }
+
+    /**
+     * The link modal of one device: join one of the existing groups of its kind ({@code ok}: the
+     * group fits, e.g. the same DMX light type), or start a new group with it.
+     */
+    private void linkDialog(String device, String defName, String[] groups, String[] info, boolean[] ok,
+                            java.util.function.Consumer<String> join, java.util.function.Consumer<String> create) {
+        ScrollView sc = new ScrollView(this);
         LinearLayout box = Ui.column(this);
         int p = Ui.dp(this, 20);
-        box.setPadding(p, Ui.dp(this, 8), p, 0);
-        android.widget.EditText nameField = new android.widget.EditText(this);
-        nameField.setHint(hint);
-        nameField.setSingleLine(true);
-        nameField.setTextColor(Ui.TEXT);
-        nameField.setHintTextColor(0xFF5C5D66);
-        box.addView(nameField);
-        for (int i = 0; i < names.length; i++) {
-            final int k = i;
-            android.widget.CheckBox cb = new android.widget.CheckBox(this);
-            cb.setText(names[i]);
-            cb.setTextColor(Ui.TEXT);
-            cb.setOnCheckedChangeListener((bv, c) -> checked[k] = c);
-            box.addView(cb);
-        }
-        ScrollView sc = new ScrollView(this);
+        box.setPadding(p, Ui.dp(this, 4), p, Ui.dp(this, 4));
         sc.addView(box);
-        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(title)
+        android.app.AlertDialog[] dlg = new android.app.AlertDialog[1];
+        if (groups.length > 0) {
+            box.addView(Ui.label(this, "Add to a group"));
+            for (int i = 0; i < groups.length; i++) {
+                final String g = groups[i];
+                TextView c = Ui.text(this, g + "\n" + info[i], 15, ok[i] ? Ui.TEXT : Ui.SUB, true);
+                c.setLineSpacing(0, 1.15f);
+                c.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 14), Ui.dp(this, 10));
+                if (ok[i]) {
+                    Ui.clickable(c, Ui.CARD_2, Ui.dp(this, 12));
+                    c.setOnClickListener(v -> {
+                        join.accept(g);
+                        if (dlg[0] != null) dlg[0].dismiss();
+                    });
+                } else {
+                    c.setBackground(Ui.rounded(Ui.CARD, Ui.dp(this, 12)));
+                }
+                box.addView(c, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 6)));
+            }
+        }
+        box.addView(Ui.label(this, "New group"));
+        android.widget.EditText name = new android.widget.EditText(this);
+        name.setHint(defName);
+        name.setSingleLine(true);
+        name.setTextColor(Ui.TEXT);
+        name.setHintTextColor(0xFF5C5D66);
+        box.addView(name);
+        TextView make = Ui.button(this, "Create group", true);
+        make.setOnClickListener(v -> {
+            String n = name.getText().toString().trim();
+            create.accept(n.isEmpty() ? defName : n);
+            if (dlg[0] != null) dlg[0].dismiss();
+        });
+        box.addView(make, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+        TextView note = Ui.text(this, "A group shares one look. Link more lights to it with their own link symbol.", 13, Ui.SUB, false);
+        box.addView(note, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+        dlg[0] = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Group \"" + device + "\"")
                 .setView(sc)
-                .setPositiveButton("Group", (dlg, w) -> {
-                    List<Integer> chosen = new ArrayList<>();
-                    for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(i);
-                    if (chosen.size() < 2) {
-                        android.widget.Toast.makeText(this, "Pick at least two", android.widget.Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    done.picked(chosen, nameField.getText().toString().trim());
-                })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    /** One button for every kind of light. */
+    private void addDeviceDialog() {
+        String[][] kinds = {
+                {"Hue lamp", "Philips Hue, through a Hue Bridge"},
+                {"LED strip", "WLED / ESP32 · DDP, E1.31 or WLED UDP"},
+                {"DMX light", "Through an Art-Net or sACN node"}};
+        LinearLayout box = Ui.column(this);
+        int p = Ui.dp(this, 20);
+        box.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 4));
+        android.app.AlertDialog[] dlg = new android.app.AlertDialog[1];
+        for (int i = 0; i < kinds.length; i++) {
+            final int k = i;
+            LinearLayout c = Ui.column(this);
+            c.addView(Ui.text(this, kinds[i][0], 16, Ui.TEXT, true));
+            c.addView(Ui.text(this, kinds[i][1], 13, Ui.SUB, false));
+            c.setPadding(Ui.dp(this, 16), Ui.dp(this, 12), Ui.dp(this, 16), Ui.dp(this, 12));
+            Ui.clickable(c, Ui.CARD_2, Ui.dp(this, 14));
+            c.setOnClickListener(v -> {
+                if (dlg[0] != null) dlg[0].dismiss();
+                if (k == 0) addHueLamps();
+                else if (k == 1) startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP);
+                else startActivityForResult(new Intent(this, DmxSetupActivity.class), REQ_DMX);
+            });
+            box.addView(c, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
+        }
+        dlg[0] = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Add a light")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void linkHue(HueLamp h) {
+        java.util.LinkedHashMap<String, Integer> gs = new java.util.LinkedHashMap<>();
+        for (HueLamp o : hueList) if (!o.group.isEmpty()) gs.merge(o.group, 1, Integer::sum);
+        String[] names = gs.keySet().toArray(new String[0]);
+        String[] info = new String[names.length];
+        boolean[] ok = new boolean[names.length];
+        for (int i = 0; i < names.length; i++) {
+            info[i] = gs.get(names[i]) + (gs.get(names[i]) == 1 ? " lamp" : " lamps");
+            ok[i] = true;
+        }
+        linkDialog(h.name, "Lamps", names, info, ok, g -> {
+            for (HueLamp o : hueList) if (g.equals(o.group)) {
+                h.copyLookFrom(o);
+                break;
+            }
+            h.group = g;
+            saveHue(false);
+            rebuildHue();
+        }, n -> {
+            h.group = freeName(n, gs.keySet());
+            saveHue(false);
+            rebuildHue();
+        });
+    }
+
+    private void linkStrip(Strip st) {
+        java.util.LinkedHashMap<String, Integer> gs = new java.util.LinkedHashMap<>();
+        for (Strip o : stripList) if (!o.group.isEmpty()) gs.merge(o.group, 1, Integer::sum);
+        String[] names = gs.keySet().toArray(new String[0]);
+        String[] info = new String[names.length];
+        boolean[] ok = new boolean[names.length];
+        for (int i = 0; i < names.length; i++) {
+            info[i] = gs.get(names[i]) + (gs.get(names[i]) == 1 ? " strip" : " strips");
+            ok[i] = true;
+        }
+        linkDialog(st.name, "Strips", names, info, ok, g -> {
+            for (Strip o : stripList) if (g.equals(o.group)) {
+                st.copyLookFrom(o);
+                break;
+            }
+            st.group = g;
+            saveStrips();
+            rebuildStrips();
+        }, n -> {
+            st.group = freeName(n, gs.keySet());
+            saveStrips();
+            rebuildStrips();
+        });
+    }
+
+    /** DMX lights only join groups of the same light type (the same channels). */
+    private void linkDmx(DmxLight d) {
+        java.util.LinkedHashMap<String, Integer> gs = new java.util.LinkedHashMap<>();
+        java.util.Map<String, DmxLight> lead = new java.util.HashMap<>();
+        for (DmxLight o : dmxList) if (!o.group.isEmpty()) {
+            gs.merge(o.group, 1, Integer::sum);
+            lead.putIfAbsent(o.group, o);
+        }
+        String[] names = gs.keySet().toArray(new String[0]);
+        String[] info = new String[names.length];
+        boolean[] ok = new boolean[names.length];
+        for (int i = 0; i < names.length; i++) {
+            ok[i] = java.util.Arrays.equals(lead.get(names[i]).roles, d.roles);
+            info[i] = gs.get(names[i]) + (gs.get(names[i]) == 1 ? " light" : " lights") + (ok[i] ? "" : " · other light type");
+        }
+        linkDialog(d.name, d.name.replaceAll("\\s*\\d+$", "") + "s", names, info, ok, g -> {
+            d.copyLookFrom(lead.get(g));
+            d.group = g;
+            prefs.saveDmx(dmxList);
+            rebuildDmx();
+        }, n -> {
+            d.group = freeName(n, gs.keySet());
+            prefs.saveDmx(dmxList);
+            rebuildDmx();
+        });
     }
 
     /** Rename or dissolve a group. */
@@ -591,12 +742,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
         if (hueBox == null) return;
         hueBox.removeAllViews();
         hueList = prefs.hueLamps();
-        if (!prefs.isPaired()) {
-            TextView t = Ui.button(this, "+ Add Hue lamps", false);
-            t.setOnClickListener(v -> addHueLamps());
-            hueBox.addView(t, Ui.lp(Ui.MATCH, Ui.WRAP));
-            return;
-        }
+        if (!prefs.isPaired() || hueList.isEmpty()) return;
+        hueBox.addView(section("Hue lamps"));
         int on = 0;
         for (HueLamp h : hueList) if (h.enabled) on++;
         if (on > 10) {
@@ -613,39 +760,13 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 continue;
             }
             TextView[] title = new TextView[1];
-            LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> startActivityForResult(new Intent(this, HueSetupActivity.class)
+            LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> linkHue(h), () -> startActivityForResult(new Intent(this, HueSetupActivity.class)
                     .putExtra(HueSetupActivity.EXTRA_INDEX, idx), REQ_SETUP), h.enabled, (bv, checked) -> {
                 h.enabled = checked;
                 saveHue(true);
             }, title);
             buildHueBody(c[1], h, false, title[0]);
             hueBox.addView(c[0], Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
-        }
-        TextView add = Ui.button(this, "+ Add Hue lamps", false);
-        add.setOnClickListener(v -> addHueLamps());
-        hueBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
-        int loose = 0;
-        for (HueLamp h : hueList) if (h.group.isEmpty()) loose++;
-        if (loose >= 2) {
-            TextView grp = Ui.button(this, "+ Group lamps", false);
-            grp.setOnClickListener(v -> {
-                List<HueLamp> free = new ArrayList<>();
-                for (HueLamp h : hueList) if (h.group.isEmpty()) free.add(h);
-                String[] names = new String[free.size()];
-                for (int i = 0; i < names.length; i++) names[i] = free.get(i).name;
-                pickMembers("Group lamps", "Group name, e.g. Living room", names, (chosen, name) -> {
-                    String g = name.isEmpty() ? "Lamps" : name;
-                    for (HueLamp o : hueList) if (g.equals(o.group)) g = g + " 2";
-                    HueLamp lead = free.get(chosen.get(0));
-                    for (int k : chosen) {
-                        free.get(k).group = g;
-                        if (free.get(k) != lead) free.get(k).copyLookFrom(lead);
-                    }
-                    saveHue(false);
-                    rebuildHue();
-                });
-            });
-            hueBox.addView(grp, Ui.lp(Ui.MATCH, Ui.WRAP));
         }
     }
 
@@ -775,6 +896,14 @@ public class MainActivity extends Activity implements SyncState.Listener {
         for (HueLamp m : members) {
             LinearLayout row = Ui.row(this);
             row.addView(Ui.text(this, m.name, 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            final int mi = hueList.indexOf(m);
+            row.addView(linkIcon(true, () -> {
+                m.group = "";
+                saveHue(false);
+                rebuildHue();
+            }));
+            row.addView(iconGear(() -> startActivityForResult(new Intent(this, HueSetupActivity.class)
+                    .putExtra(HueSetupActivity.EXTRA_INDEX, mi), REQ_SETUP)));
             Switch ms = new Switch(this);
             ms.setChecked(m.enabled);
             ms.setOnCheckedChangeListener((bv, ch) -> {
@@ -883,6 +1012,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
             final int mi = stripList.indexOf(m);
             LinearLayout row = Ui.row(this);
             row.addView(Ui.text(this, m.name + " · " + m.leds + " LEDs", 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            row.addView(linkIcon(true, () -> {
+                m.group = "";
+                saveStrips();
+                rebuildStrips();
+            }));
             TextView mg = Ui.text(this, "⚙", 18, Ui.SUB, false);
             mg.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
             mg.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
@@ -1045,6 +1179,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         stripList = prefs.strips();
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
         java.util.Set<String> shownStripGroups = new java.util.HashSet<>();
+        if (!stripList.isEmpty()) stripsBox.addView(section("LED strips"));
         for (int i = 0; i < stripList.size(); i++) {
             final int idx = i;
             final Strip st = stripList.get(i);
@@ -1070,6 +1205,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
             gear.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
             gear.setContentDescription("Connection settings");
+            head.addView(linkIcon(false, () -> linkStrip(st)));
             gear.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class)
                     .putExtra(StripSetupActivity.EXTRA_INDEX, idx), REQ_STRIP));
             head.addView(gear);
@@ -1098,33 +1234,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             buildStripBody(body, st, t);
             card.addView(body);
 
-            stripsBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
-        }
-        TextView add = Ui.button(this, "+ Add LED strip (WLED / ESP32)", false);
-        add.setOnClickListener(v -> startActivityForResult(new Intent(this, StripSetupActivity.class), REQ_STRIP));
-        stripsBox.addView(add, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
-        int loose = 0;
-        for (Strip x : stripList) if (x.group.isEmpty()) loose++;
-        if (loose >= 2) {
-            TextView grp = Ui.button(this, "+ Group strips", false);
-            grp.setOnClickListener(v -> {
-                List<Strip> free = new ArrayList<>();
-                for (Strip x : stripList) if (x.group.isEmpty()) free.add(x);
-                String[] names = new String[free.size()];
-                for (int i = 0; i < names.length; i++) names[i] = free.get(i).name + " (" + free.get(i).leds + " LEDs)";
-                pickMembers("Group strips", "Group name, e.g. Shelf", names, (chosen, name) -> {
-                    String g = name.isEmpty() ? "Strips" : name;
-                    for (Strip o : stripList) if (g.equals(o.group)) g = g + " 2";
-                    Strip lead = free.get(chosen.get(0));
-                    for (int k : chosen) {
-                        free.get(k).group = g;
-                        if (free.get(k) != lead) free.get(k).copyLookFrom(lead);
-                    }
-                    saveStrips();
-                    rebuildStrips();
-                });
-            });
-            stripsBox.addView(grp, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            stripsBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
         }
     }
 
@@ -1333,6 +1443,11 @@ public class MainActivity extends Activity implements SyncState.Listener {
             mc.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8));
             LinearLayout mh = Ui.row(this);
             mh.addView(Ui.text(this, m.name + " · Ch " + m.address + "–" + m.lastChannel(), 14, Ui.TEXT, true), Ui.lp(0, Ui.WRAP, 1));
+            mh.addView(linkIcon(true, () -> {
+                m.group = "";
+                prefs.saveDmx(dmxList);
+                rebuildDmx();
+            }));
             TextView mg = Ui.text(this, "⚙", 18, Ui.SUB, false);
             mg.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
             mg.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class)
@@ -1363,60 +1478,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }
         card.addView(body);
         return card;
-    }
-
-    /** Pick lights of the same type and give the group a name. */
-    private void makeGroup() {
-        List<DmxLight> loose = new ArrayList<>();
-        for (DmxLight x : dmxList) if (x.group.isEmpty()) loose.add(x);
-        String[] names = new String[loose.size()];
-        for (int i = 0; i < names.length; i++) names[i] = loose.get(i).name + " (Ch " + loose.get(i).address + ")";
-        boolean[] checked = new boolean[names.length];
-        LinearLayout box = Ui.column(this);
-        int p = Ui.dp(this, 20);
-        box.setPadding(p, Ui.dp(this, 8), p, 0);
-        android.widget.EditText nameField = new android.widget.EditText(this);
-        nameField.setHint("Group name, e.g. PicoSpots");
-        nameField.setSingleLine(true);
-        nameField.setTextColor(Ui.TEXT);
-        nameField.setHintTextColor(0xFF5C5D66);
-        box.addView(nameField);
-        for (int i = 0; i < names.length; i++) {
-            final int k = i;
-            android.widget.CheckBox cb = new android.widget.CheckBox(this);
-            cb.setText(names[i]);
-            cb.setTextColor(Ui.TEXT);
-            cb.setOnCheckedChangeListener((bv, c) -> checked[k] = c);
-            box.addView(cb);
-        }
-        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Group lights")
-                .setView(box)
-                .setPositiveButton("Group", (dlg, w) -> {
-                    List<DmxLight> chosen = new ArrayList<>();
-                    for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(loose.get(i));
-                    if (chosen.size() < 2) {
-                        android.widget.Toast.makeText(this, "Pick at least two lights", android.widget.Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    for (DmxLight c : chosen) {
-                        if (!java.util.Arrays.equals(c.roles, chosen.get(0).roles)) {
-                            android.widget.Toast.makeText(this, "Only lights of the same type can be grouped", android.widget.Toast.LENGTH_LONG).show();
-                            return;
-                        }
-                    }
-                    String gname = nameField.getText().toString().trim();
-                    if (gname.isEmpty()) gname = chosen.get(0).name.replaceAll("\\s*\\d+$", "") + "s";
-                    for (DmxLight o : dmxList) if (gname.equals(o.group)) gname = gname + " 2";
-                    for (DmxLight c : chosen) {
-                        c.group = gname;
-                        if (c != chosen.get(0)) c.copyLookFrom(chosen.get(0));
-                    }
-                    prefs.saveDmx(dmxList);
-                    rebuildDmx();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
     }
 
     private void groupSettings(String name) {
@@ -1461,6 +1522,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         dmxList = prefs.dmxLights();
         android.content.SharedPreferences ui = getSharedPreferences("huebeat_ui", MODE_PRIVATE);
         java.util.Set<String> shownGroups = new java.util.HashSet<>();
+        if (!dmxList.isEmpty()) dmxBox.addView(section("DMX lights"));
         for (int i = 0; i < dmxList.size(); i++) {
             final int idx = i;
             final DmxLight d = dmxList.get(i);
@@ -1485,6 +1547,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             TextView gear = Ui.text(this, "⚙", 20, Ui.SUB, false);
             gear.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
             gear.setContentDescription("Light settings");
+            head.addView(linkIcon(false, () -> linkDmx(d)));
             gear.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class)
                     .putExtra(DmxSetupActivity.EXTRA_INDEX, idx), REQ_DMX));
             head.addView(gear);
@@ -1512,16 +1575,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
             card.addView(body);
             dmxBox.addView(card, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
         }
-        TextView add = Ui.button(this, "+ Add DMX light (Art-Net / sACN)", false);
-        add.setOnClickListener(v -> startActivityForResult(new Intent(this, DmxSetupActivity.class), REQ_DMX));
-        int loose = 0;
-        for (DmxLight x : dmxList) if (x.group.isEmpty()) loose++;
-        if (loose >= 2) {
-            TextView grp = Ui.button(this, "+ Group lights", false);
-            grp.setOnClickListener(v -> makeGroup());
-            dmxBox.addView(grp, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 8)));
-        }
-        dmxBox.addView(add, Ui.lp(Ui.MATCH, Ui.WRAP));
     }
 
     private String dmxAmbientName(DmxLight d) {
@@ -1807,7 +1860,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private void startFlow() {
         if (!prefs.hasOutputs()) {
             // nothing to light yet: Hue is the usual start; with other lights set up, one has to be on
-            if (prefs.hueLamps().isEmpty() && prefs.strips().isEmpty() && prefs.dmxLights().isEmpty()) addHueLamps();
+            if (prefs.hueLamps().isEmpty() && prefs.strips().isEmpty() && prefs.dmxLights().isEmpty()) addDeviceDialog();
             else android.widget.Toast.makeText(this, "Switch on at least one light below", android.widget.Toast.LENGTH_LONG).show();
             return;
         }
