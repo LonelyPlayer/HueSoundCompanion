@@ -1,4 +1,4 @@
-# HueSoundCompanion
+# LightBox
 
 Music sync for Philips Hue and LED strips that listens to **everything your phone plays** (speaker or Bluetooth), **one app**, or the **microphone**, and streams colors to your lights through the Hue Entertainment API. No Sync Box, no cloud. It also has a **Just lights** mode for everyday lighting without music.
 
@@ -49,7 +49,7 @@ The APK is built automatically by GitHub Actions:
 
 1. Put this project in a GitHub repository (branch `main`).
 2. Every push runs the **Build APK** workflow. It takes about 3–5 minutes.
-3. On your phone, open the repository's **Releases** page and download `HueSoundCompanion.apk` from the newest "HueSoundCompanion build".
+3. On your phone, open the repository's **Releases** page and download `LightBox.apk` from the newest "LightBox build".
 4. Open the file. Android will ask you to allow installing apps from your browser or Files app; allow it once.
 
 You can also start a build by hand: **Actions › Build APK › Run workflow**.
@@ -60,17 +60,17 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## First start
 
-1. HueSoundCompanion finds your bridge on the Wi-Fi (or type its IP).
-2. Press the round link button on the bridge. HueSoundCompanion connects automatically.
+1. LightBox finds your bridge on the Wi-Fi (or type its IP).
+2. Press the round link button on the bridge. LightBox connects automatically.
 3. Pick your **entertainment area**. If you don't have one, create it in the Hue app under *Settings › Entertainment areas* with your color lights.
-4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; HueSoundCompanion records nothing and keeps no audio, it only measures it.
+4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; LightBox records nothing and keeps no audio, it only measures it.
 
 ## Good to know
 
-- **Some apps block audio capture** (Spotify and SoundCloud, for example). HueSoundCompanion notices when music plays but nothing arrives, and switches automatically to Android's music visualizer, which still sees the overall output. It's a bit coarser (about 20 snapshots per second instead of the full audio) and may not work on every phone or while the screen is off. If neither works, use **Microphone**.
-- While HueSoundCompanion streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
+- **Some apps block audio capture** (Spotify and SoundCloud, for example). LightBox notices when music plays but nothing arrives, and switches automatically to Android's music visualizer, which still sees the overall output. It's a bit coarser (about 20 snapshots per second instead of the full audio) and may not work on every phone or while the screen is off. If neither works, use **Microphone**.
+- While LightBox streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
 - Only one entertainment area can stream per bridge at a time; a running Hue Sync session will be replaced.
-- The bridge is contacted over your local network only. HueSoundCompanion accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).
+- The bridge is contacted over your local network only. LightBox accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).
 - **Photosensitivity:** Party style with strobe enabled produces fast flashes.
 
 ## How it works (for tinkering)
@@ -97,7 +97,7 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## License and credits
 
-HueSoundCompanion is free software under the **GNU General Public License v3.0** (see `LICENSE`).
+LightBox is free software under the **GNU General Public License v3.0** (see `LICENSE`).
 
 The strip effects in `core/LedFx.java`, the Gradient/Fade/Rainbow/Random Flash/Pixels animations and the rain droplet shape are ported from **[LedFx](https://github.com/LedFx/LedFx)** (v2.2.1), © the LedFx developers, licensed under GPL-3.0. Thank you to the LedFx project. TV detection uses Google MediaPipe (Apache 2.0) with the EfficientDet-Lite0 model.
 

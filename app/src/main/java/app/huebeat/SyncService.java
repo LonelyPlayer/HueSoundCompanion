@@ -814,7 +814,7 @@ public class SyncService extends Service {
         String who = mode == Prefs.MODE_APP ? Prefs.get(this).appLabel() : "the app that's playing";
         if (media == 0) return "Nothing seems to be playing right now. Start some music.";
         if (blocked > 0) return "Music is playing, but " + who + " doesn't allow other apps to capture its sound. Use \"Microphone\" for this app.";
-        return "Music is playing, but no sound reaches HueSoundCompanion. " + who.substring(0, 1).toUpperCase() + who.substring(1)
+        return "Music is playing, but no sound reaches LightBox. " + who.substring(0, 1).toUpperCase() + who.substring(1)
                 + " probably blocks capture. Use \"Microphone\" for this app.";
     }
 
@@ -843,7 +843,7 @@ public class SyncService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle("HueSoundCompanion")
+                .setContentTitle("LightBox")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)

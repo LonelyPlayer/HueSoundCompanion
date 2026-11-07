@@ -113,7 +113,7 @@ public class AppPickerActivity extends Activity {
         if (isFinishing()) return;
         list.removeAllViews();
         if (!usage) {
-            TextView banner = Ui.text(this, "Show recently opened apps first\nTap to allow usage access for HueSoundCompanion", 14, Ui.TEXT, true);
+            TextView banner = Ui.text(this, "Show recently opened apps first\nTap to allow usage access for LightBox", 14, Ui.TEXT, true);
             banner.setLineSpacing(0, 1.2f);
             int p = Ui.dp(this, 14);
             banner.setPadding(p, p, p, p);

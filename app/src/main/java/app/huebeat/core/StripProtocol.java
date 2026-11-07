@@ -103,7 +103,7 @@ public final class StripProtocol {
             // --- framing layer
             flagsLength(p, 38, p.length - 38);
             p[43] = 0x02;                                          // vector: VECTOR_E131_DATA_PACKET
-            byte[] name = "HueSoundCompanion".getBytes(StandardCharsets.US_ASCII);
+            byte[] name = "LightBox".getBytes(StandardCharsets.US_ASCII);
             System.arraycopy(name, 0, p, 44, name.length);         // source name (64 bytes)
             p[108] = 100;                                          // priority
             p[111] = (byte) seq;

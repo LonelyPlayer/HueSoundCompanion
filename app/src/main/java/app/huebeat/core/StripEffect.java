@@ -27,7 +27,7 @@ public final class StripEffect {
         CATEGORIES = new String[n];
         for (int i = 0; i < OWN.length; i++) {
             NAMES[i] = OWN[i];
-            CATEGORIES[i] = "HueSoundCompanion";
+            CATEGORIES[i] = "LightBox";
         }
         for (int i = 0; i < LedFx.EFFECTS.size(); i++) {
             NAMES[LEDFX_BASE + i] = LedFx.EFFECTS.get(i).name;

@@ -109,7 +109,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
         // header
         LinearLayout header = Ui.row(this);
-        TextView title = Ui.text(this, "HueSoundCompanion", 22, Ui.TEXT, true);
+        TextView title = Ui.text(this, "LightBox", 22, Ui.TEXT, true);
         header.addView(title, Ui.lp(0, Ui.WRAP, 1));
         TextView setup = Ui.text(this, "Setup", 14, Ui.SUB, true);
         setup.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 12), Ui.dp(this, 8));
@@ -1991,7 +1991,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             startFlow();
         } else {
             SyncState.set(SyncState.Status.ERROR,
-                    "HueSoundCompanion needs the audio permission to hear the music. Android files phone-audio capture under it too.");
+                    "LightBox needs the audio permission to hear the music. Android files phone-audio capture under it too.");
         }
     }
 

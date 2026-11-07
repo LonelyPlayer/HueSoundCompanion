@@ -400,7 +400,7 @@ public final class HueApi {
                         .put("positions", pos));
             }
             return new JSONObject()
-                    .put("metadata", new JSONObject().put("name", "HueSoundCompanion"))
+                    .put("metadata", new JSONObject().put("name", "LightBox"))
                     .put("locations", new JSONObject().put("service_locations", sl));
         }
     }

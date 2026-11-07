@@ -30,18 +30,18 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk HueSoundCompanion.apk
+          cp app/build/outputs/apk/release/app-release.apk LightBox.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HueSoundCompanion-apk
-          path: HueSoundCompanion.apk
+          name: LightBox-apk
+          path: LightBox.apk
 
       # Publishes the APK as a GitHub release so you can download it directly on your phone
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: HueSoundCompanion build ${{ github.run_number }}
-          files: HueSoundCompanion.apk
+          name: LightBox build ${{ github.run_number }}
+          files: LightBox.apk
           make_latest: true

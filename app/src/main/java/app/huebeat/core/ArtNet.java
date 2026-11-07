@@ -55,7 +55,7 @@ public final class ArtNet {
         System.arraycopy(cid, 0, p, 22, 16);
         flagsLength(p, 38, p.length - 38);
         p[43] = 0x02;
-        byte[] name = "HueSoundCompanion".getBytes(StandardCharsets.US_ASCII);
+        byte[] name = "LightBox".getBytes(StandardCharsets.US_ASCII);
         System.arraycopy(name, 0, p, 44, name.length);
         p[108] = 100;
         p[111] = (byte) sequence;
