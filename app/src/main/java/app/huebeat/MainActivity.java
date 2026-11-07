@@ -38,7 +38,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private static final int REQ_SETUP = 4;
     private static final int REQ_EDIT_PALETTE = 5;
     private static final int REQ_STRIP = 6;
-    private LinearLayout stripsBox, dmxBox;
+    private LinearLayout stripsBox, dmxBox, shuffleRow;
     private List<DmxLight> dmxList;
     private static final int REQ_DMX = 9;
     private LinearLayout palettesRow;
@@ -194,6 +194,16 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }
         styleScroll.addView(styles);
         look.addView(styleScroll);
+        shuffleRow = Ui.row(this);
+        TextView shHint = Ui.text(this, "Shuffle picks style, palette, intensity and strip effects to fit the music, "
+                + "and changes them after phrases and on drops.", 13, Ui.SUB, false);
+        shHint.setLineSpacing(0, 1.1f);
+        shuffleRow.addView(shHint, Ui.lp(0, Ui.WRAP, 1));
+        TextView shNow = Ui.chip(this, "Shuffle now");
+        shNow.setTextColor(Ui.ACCENT);
+        shNow.setOnClickListener(v -> SyncState.reshuffle = true);
+        shuffleRow.addView(shNow, Ui.margins(Ui.lp(Ui.WRAP, Ui.WRAP), Ui.dp(this, 10), 0, 0, 0));
+        look.addView(shuffleRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
 
         // palette
         look.addView(section("Colors"));
@@ -1004,6 +1014,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         for (int i = 0; i < styleChips.size(); i++) Ui.setChipSelected(styleChips.get(i), LightSettings.STYLE_ORDER[i] == prefs.light.style);
         boolean screenCols = prefs.light.screenColors;
         boolean screenStyle = prefs.light.style == LightSettings.STYLE_SCREEN;
+        if (shuffleRow != null) shuffleRow.setVisibility(prefs.light.style == LightSettings.STYLE_SHUFFLE ? View.VISIBLE : View.GONE);
         Ui.setChipSelected(screenChip, screenCols || screenStyle);
         for (int i = 0; i < paletteChips.size(); i++) {
             Ui.setChipSelected(paletteChips.get(i), !screenCols && !screenStyle && i == prefs.light.palette);
@@ -1022,6 +1033,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
             case RUNNING:
                 status.setTextColor(Ui.TEXT);
                 String st = amb ? "Lights on" : SyncState.bpm > 0 ? "Syncing · " + Math.round(SyncState.bpm) + " BPM" : "Syncing";
+                if (!amb && prefs.light.style == LightSettings.STYLE_SHUFFLE && !SyncState.shuffle.isEmpty()) {
+                    st += "\nShuffle: " + SyncState.shuffle;
+                }
                 if (!amb && prefs.light.style == LightSettings.STYLE_CHORDS) {
                     if (!SyncState.chord.isEmpty()) st += " · " + SyncState.chord;
                     else if (prefs.mode() != Prefs.MODE_MIC && SyncState.visualizer) st += " · no chords via visualizer";

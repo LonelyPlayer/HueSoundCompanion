@@ -59,7 +59,8 @@ public final class Palettes {
         return i >= BUILT_IN_COUNT && i < count();
     }
 
-    private static int[] colorsOf(int i) {
+    /** The colors of a palette (null for Auto). */
+    public static int[] colorsOf(int i) {
         if (i <= 0) return null;
         if (i < BUILT_IN_COUNT) return BUILT_IN[i];
         List<Custom> c = custom;

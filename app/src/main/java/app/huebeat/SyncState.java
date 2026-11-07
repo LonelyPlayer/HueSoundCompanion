@@ -27,6 +27,9 @@ public final class SyncState {
     public static volatile String chord = "";
     /** The visualizer fallback is feeding the analysis (e.g. Spotify blocks capture). */
     public static volatile boolean visualizer;
+    /** Shuffle: the look playing now ("Chords · Synthwave"), and a request for a new one. */
+    public static volatile String shuffle = "";
+    public static volatile boolean reshuffle;
 
     private SyncState() {
     }

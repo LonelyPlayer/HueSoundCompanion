@@ -194,6 +194,8 @@ public class SyncService extends Service {
         boolean streamingStarted = false;
         DatagramSocket stripSock = null;
         DmxRun dmxRun = new DmxRun();
+        app.huebeat.core.Shuffle shuffle = new app.huebeat.core.Shuffle();
+        boolean shuffled = false;
         boolean hue = prefs.isConfigured();
         try {
             int seenStrips = Prefs.stripsVersion;
@@ -396,12 +398,34 @@ public class SyncService extends Service {
                 }
                 Features f = active.at(now - ls.delayMs * 1_000_000L);
                 double tSec = (now - start) / 1e9;
-                if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, ls);
                 dmxRun.update(prefs);
-                if (!calibrating) dmxRun.out.render(f, tSec, dt, ls);
+                // Shuffle: the director picks style, palette and effects; everything renders with its picks
+                LightSettings use = ls;
+                if (ls.style == LightSettings.STYLE_SHUFFLE) {
+                    if (SyncState.reshuffle) {
+                        SyncState.reshuffle = false;
+                        shuffle.reshuffle();
+                    }
+                    shuffle.update(f, dt, ls);
+                    use = shuffle.out;
+                    for (int k = 0; k < strips.size(); k++) shuffle.applyStrip(k, strips.get(k));
+                    for (Dmx.Fixture fx : dmxRun.out.fixtures) shuffle.applyDmx(fx);
+                    SyncState.shuffle = shuffle.describe();
+                    shuffled = true;
+                } else if (shuffled) {
+                    // back to the user's own settings
+                    shuffled = false;
+                    SyncState.shuffle = "";
+                    List<Strip> cfg = activeStrips(prefs);
+                    for (int k = 0; k < cfg.size() && k < strips.size(); k++) cfg.get(k).applyLive(strips.get(k));
+                    dmxRun.seen = Integer.MIN_VALUE;
+                    dmxRun.update(prefs);
+                }
+                if (!calibrating && renderer != null) rgb = renderer.render(f, tSec, dt, use);
+                if (!calibrating) dmxRun.out.render(f, tSec, dt, use);
                 float[][] stripRgb = new float[strips.size()][];
                 for (int k = 0; k < strips.size(); k++) {
-                    stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, ls);
+                    stripRgb[k] = calibrating ? strips.get(k).fill(calColor) : strips.get(k).render(f, tSec, dt, use);
                 }
                 // remember what the lights showed (average), for removing their glow from the camera image
                 float sr = 0f, sg = 0f, sb = 0f;
@@ -626,6 +650,7 @@ public class SyncService extends Service {
             SyncState.bpm = 0f;
             SyncState.chord = "";
             SyncState.visualizer = false;
+            SyncState.shuffle = "";
             SyncState.set(SyncState.Status.RUNNING, "");
             SyncState.setHint("");
             notifyAmbient(prefs);
