@@ -149,6 +149,8 @@ public final class Dmx {
         private boolean side;
         private int wheelSlot = 0;
         private float wheelHold = 0f;
+        /** Seconds the color wheel still needs to reach its new color (the beam stays dark meanwhile). */
+        private float wheelMoving = 0f;
         private float strobeLeft = 0f;
         private double ambientT = 0;
         private final Random rnd;
@@ -325,6 +327,9 @@ public final class Dmx {
             // mirrored groups: every second member swings the other way around its own aim
             float panOut = together == 1 && memberIdx % 2 == 1 ? clamp01(2f * panCenter - pan) : pan;
             if (hasWheel) updateWheel(cr, cg, cb, level, dt);
+            wheelMoving = Math.max(0f, wheelMoving - dt);
+            // blackout while the wheel turns: no half colors, the flash shows in the right color
+            if (wheelMoving > 0f) lin = 0f;
             strobeLeft = Math.max(0f, strobeLeft - dt);
 
             for (int i = 0; i < ro.length; i++) {
@@ -355,6 +360,8 @@ public final class Dmx {
         /** Nearest wheel color, with some patience so the wheel doesn't rattle between two slots. */
         private void updateWheel(float r, float g, float b, float level, float dt) {
             wheelHold -= dt;
+            // dark: there is no color to aim for, so the wheel keeps the last real one
+            if (level < 0.05f) return;
             int best = 0;
             float bestD = 1e9f;
             for (int s = 0; s < WHEEL_RGB.length; s++) {
@@ -366,9 +373,12 @@ public final class Dmx {
             }
             if (best == wheelSlot) return;
             float cur = dist(WHEEL_RGB[wheelSlot], r, g, b);
-            if (wheelHold <= 0f && (bestD < cur * 0.8f || level < 0.05f)) {
+            if (wheelHold <= 0f && bestD < cur * 0.8f) {
+                int steps = Math.abs(best - wheelSlot);
+                steps = Math.min(steps, WHEEL_RGB.length - steps);
+                wheelMoving = Math.min(0.25f, 0.04f + 0.05f * steps); // roughly how long the motor needs
                 wheelSlot = best;
-                wheelHold = 0.25f; // the wheel needs a moment to turn
+                wheelHold = 0.25f; // don't rattle between two colors
             }
         }
 
