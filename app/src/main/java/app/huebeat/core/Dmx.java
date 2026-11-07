@@ -106,6 +106,8 @@ public final class Dmx {
             "Follow melody"};
 
     /** Gobo choice: open, one of 7 gobos, or a new one every bar. */
+    public static final String[] STROBE_MODES = {"Off", "Strong beats", "High intensity", "Build-ups", "High intensity + build-ups"};
+
     public static final String[] GOBOS = {"Open", "1", "2", "3", "4", "5", "6", "7", "New every bar"};
     static final int[] GOBO_DMX = {7, 23, 39, 54, 70, 86, 101, 117};
 
@@ -122,7 +124,7 @@ public final class Dmx {
         public volatile float brightness = 1f;
         /** Moving heads: where they point (0..1 of the full range) and how far they roam. */
         public volatile float panCenter = 0.5f, tiltCenter = 0.5f, move = 0.5f;
-        /** 0 = no strobe, 1 = on strong beats. */
+        /** 0 = no strobe, 1 = strong beats, 2 = high intensity, 3 = build-ups, 4 = high intensity + build-ups. */
         public volatile int strobeMode = 0;
         /** Music: what it shows (FX_*), its own palette (-1 = the lights'), its color for the solid effects. */
         public volatile int effect = FX_LIKE, palette = -1, color = 0xFF2A6D;
@@ -144,7 +146,9 @@ public final class Dmx {
         private double ambientT = 0;
         private final Random rnd;
         private double phase = 0;
-        private float glide = 0.2f, nod = 0f, nodLevel = 0f, wanderLeft = 0f;
+        private float glide = 0.2f, nod = 0f, nodLevel = 0f, wanderLeft = 0f, buildStrobe = 0f;
+        private final Cues.Timer cueTimer = new Cues.Timer();
+        private int lastSnare = Integer.MIN_VALUE;
         private int barBeats = 0, goboSlot = 1;
         // own looks
         private Renderer ownRenderer;
@@ -246,6 +250,15 @@ public final class Dmx {
             phase += dt * cps;
             double a = 2 * Math.PI * phase;
             float m = move;
+            boolean snare = f != null && lastSnare != Integer.MIN_VALUE && f.snareCount != lastSnare;
+            if (f != null) lastSnare = f.snareCount;
+            buildStrobe = 0f;
+            if (!ambient && strobeMode >= 2) {
+                int cue = strobeMode == 2 ? Cues.HIGH_INTENSITY : strobeMode == 3 ? Cues.BUILDUPS : Cues.BOTH;
+                if (Cues.fire(cue, beat, snare, 0f, null)) strobeLeft = 0.15f;
+                // the built-in strobe speeds up with the build (its own rate channel)
+                if ((cue & Cues.BUILDUPS) != 0 && Cues.build > 0.5f) buildStrobe = (Cues.build - 0.5f) / 0.5f;
+            }
             if (beat && !ambient) {
                 barBeats++;
                 if (strobeMode == 1 && f.beatStrength > 0.8f) strobeLeft = 0.18f;
@@ -379,7 +392,7 @@ public final class Dmx {
                     case WHITE: v = Math.round(w * colorScale * 255f); break;
                     case AMBER: v = 0; break;
                     case UV: v = Math.round((hasDimmer ? 1f : lin) * 255f); break;
-                    case STROBE: v = strobeLeft > 0f ? 230 : 0; break;
+                    case STROBE: v = strobeLeft > 0f ? 230 : buildStrobe > 0f ? Math.round(30 + 225 * buildStrobe) : 0; break;
                     case PAN: v = (int) (clamp01(pan) * 65535f) >> 8; break;
                     case PAN_FINE: v = (int) (clamp01(pan) * 65535f) & 0xFF; break;
                     case TILT: v = (int) (clamp01(tilt) * 65535f) >> 8; break;

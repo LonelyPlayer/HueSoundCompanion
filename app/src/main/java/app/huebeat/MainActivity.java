@@ -246,16 +246,12 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }));
 
         strobeRow = Ui.row(this);
-        TextView strobeText = Ui.text(this, "Strobe on snares (Party)", 15, Ui.TEXT, false);
-        strobeRow.addView(strobeText, Ui.lp(0, Ui.WRAP, 1));
-        Switch strobe = new Switch(this);
-        strobe.setChecked(prefs.light.strobe);
-        strobe.setOnCheckedChangeListener((CompoundButton bv, boolean on) -> {
-            prefs.light.strobe = on;
+        look.addView(section("Lamp strobe"));
+        look.addView(Ui.chipRow(this, LightSettings.STROBE_MODES, () -> prefs.light.strobeMode, v -> {
+            prefs.light.strobeMode = v;
+            prefs.light.strobe = v == 1;
             prefs.saveLight();
-        });
-        strobeRow.addView(strobe);
-        look.addView(strobeRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
+        }));
 
         ambientLook = Ui.column(this);
         root.addView(ambientLook);
@@ -924,7 +920,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             }
             if (app.huebeat.core.Dmx.hasStrobe(d.roles)) {
                 body.addView(Ui.label(this, "Built-in strobe"));
-                body.addView(Ui.chipRow(this, new String[]{"Off", "On strong beats"}, () -> d.strobeMode, v -> {
+                body.addView(Ui.chipRow(this, app.huebeat.core.Dmx.STROBE_MODES, () -> d.strobeMode, v -> {
                     d.strobeMode = v;
                     prefs.saveDmx(dmxList);
                 }));
@@ -1119,7 +1115,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
         appRowBox.setVisibility(mode == Prefs.MODE_APP ? View.VISIBLE : View.GONE);
         String label = prefs.appLabel();
         appRow.setText(label == null ? "Choose the app to follow" : "Following: " + label);
-        strobeRow.setVisibility(prefs.light.style == LightSettings.STYLE_PARTY ? View.VISIBLE : View.GONE);
+        strobeRow.setVisibility(View.GONE);
         delayLabel.setVisibility(amb || mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
         delayBar.setVisibility(amb || mode == Prefs.MODE_MIC ? View.GONE : View.VISIBLE);
         updateDelayLabel();

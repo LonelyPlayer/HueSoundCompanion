@@ -25,6 +25,9 @@ public final class Shuffle {
     private boolean shapeInit = false;
     private float novelty = 0f, dbQuick = -1f, dbInst, dbBase = -1f, bassInst, bassBase;
     private String pending;
+    private boolean impactSeen = false;
+    private double lastBig = -100;
+    private String lastBigReason = "";
     private double pendingAt;
     /** How different the sound color must get to count as a new section (mean change per band). */
     static float NOVELTY = 0.11f;
@@ -151,21 +154,29 @@ public final class Shuffle {
         double since = clock - lastSwitch;
         String why = null;
         if (forced) why = "new look";
+        // the drop after a build-up's gap: the clearest drop there is
+        else if (warmedUp && Cues.impact > 0.5f && !impactSeen) {
+            why = "drop";
+            pending = null;
+            impactSeen = true;
+        }
         // a drop, right on its first hit: much louder and the bass is in, near the song's loudest.
         // No waiting: a drop that is noticed seconds later is already over.
         // (only a previous drop holds it back for a moment; a phrase change just before is common)
-        else if (warmedUp && since > ("drop".equals(reason) ? 2.5 : 0.8) && pickedEnergy < 0.65f && dbInst > dbBase + 4f
+        else if (warmedUp && clock - lastBig > ("drop".equals(lastBigReason) ? 6.0 : 0.8) && since > 0.8 && pickedEnergy < 0.65f && dbInst > dbBase + 4f
                 && bassInst > bassBase + 0.1f && dbInst > dbPeak - 6f) {
             why = "drop";
             pending = null;
         }
         // the opposite, just as quick: the bass drops out and it gets clearly quieter
-        else if (warmedUp && since > 1.5 && pickedEnergy > 0.45f && dbInst < dbBase - 6f && bassInst < bassBase - 0.1f) {
+        // (not the gap before a drop, and only clearly under the song's loud parts)
+        else if (warmedUp && since > 1.5 && clock - lastBig > 3.0 && pickedEnergy > 0.45f && !Cues.gap && building < 0.3f
+                && dbInst < dbBase - 6f && bassInst < bassBase - 0.1f && dbFast < dbPeak - 7f) {
             why = "calmer part";
             pending = null;
         }
         // another new section: the sound color changes suddenly → switch on the next beat
-        else if (pending == null && warmedUp && since > 1.5 && novelty > NOVELTY) {
+        else if (pending == null && warmedUp && since > 1.5 && novelty > NOVELTY && !Cues.gap && building < 0.3f) {
             float up = dbQuick - dbBase, bassUp = 0f;
             for (int i = 0; i < 5; i++) bassUp += (shapeFast[i] - shapeSlow[i]) / 5f;
             if (up < -4f || bassUp < -0.08f) pending = "calmer part";
@@ -180,7 +191,8 @@ public final class Shuffle {
             }
         }
         // slow safety net: clearly quieter than the song's loud parts for a while
-        if (why == null && pending == null && warmedUp && since > 4 && pickedEnergy > 0.45f) {
+        if (Cues.impact < 0.1f) impactSeen = false;
+        if (why == null && pending == null && warmedUp && since > 4 && pickedEnergy > 0.45f && !Cues.gap && building < 0.3f) {
             if (dbFast < dbPeak - 9f) {
                 if (quietSince < 0) quietSince = clock;
                 if (clock - quietSince > 2.0) why = "calmer part";
@@ -193,9 +205,16 @@ public final class Shuffle {
         if (why == null && pending == null && warmedUp && !rising && (beatsSince >= 32 && since > 12 || since > 40)) why = "next phrase";
         if (why != null) {
             float quick = clamp01(1f - (dbPeak - dbQuick) / 14f);
-            pickedEnergy = "drop".equals(why) ? Math.max(energy, 0.8f) : "calmer part".equals(why) ? Math.min(energy, 0.3f)
-                    : "new section".equals(why) ? 0.5f * energy + 0.5f * quick : energy;
-            pick(pickedEnergy);
+            boolean big = "drop".equals(why) || "calmer part".equals(why) || "new look".equals(why);
+            if (big) {
+                pickedEnergy = "drop".equals(why) ? Math.max(energy, 0.8f) : "calmer part".equals(why) ? Math.min(energy, 0.3f) : energy;
+                pick(pickedEnergy);
+                lastBig = clock;
+                lastBigReason = why;
+            } else {
+                // nuances keep the look's energy level: only colors and intensity move
+                nuance(0.5f * pickedEnergy + 0.5f * ("new section".equals(why) ? 0.5f * energy + 0.5f * quick : energy));
+            }
             // the new part is the new normal: compare against it from now on
             System.arraycopy(shapeFast, 0, shapeSlow, 0, Features.SPEC);
             dbBase = dbInst;
@@ -237,6 +256,20 @@ public final class Shuffle {
         dmxStrobe = e > 0.75f ? 1 : 0;
         stripPick.clear();
         stripPickF.clear();
+    }
+
+    /** Between drops and breakdowns: same style and effects, only colors and intensity move on. */
+    private void nuance(float e) {
+        palette = pickPalette(e);
+        intensity = clamp01(0.22f + 0.72f * e + (rnd.nextFloat() - 0.5f) * 0.14f);
+        colorMove = clamp01(0.25f + 0.6f * e + (rnd.nextFloat() - 0.5f) * 0.2f);
+        dmxMoveSpeed = clamp01(dmxMoveSpeed + (rnd.nextFloat() - 0.5f) * 0.15f);
+        dmxMove = clamp01(0.2f + 0.7f * e + (rnd.nextFloat() - 0.5f) * 0.1f);
+        // strips keep their effects; only the blur and speed drift a little
+        for (float[] q : stripPickF) {
+            q[0] = clamp01(q[0] + (rnd.nextFloat() - 0.5f) * 0.1f);
+            q[1] = clamp01(q[1] + (rnd.nextFloat() - 0.5f) * 0.1f);
+        }
     }
 
     /**

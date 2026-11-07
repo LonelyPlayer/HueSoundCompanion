@@ -25,6 +25,9 @@ public final class LightSettings {
     public volatile boolean strobe = false;
     /** Show build-ups and risers (brighter, whiter, faster flashes, blackout before the drop). */
     public volatile boolean buildups = true;
+    /** Lamp strobe: 0 off, 1 Party snares (= strobe), 2 high intensity, 3 build-ups, 4 both. */
+    public volatile int strobeMode = 0;
+    public static final String[] STROBE_MODES = {"Off", "Party snares", "High intensity", "Build-ups", "High intensity + build-ups"};
 
     /** Copies every setting from another instance. */
     public void copyFrom(LightSettings o) {
@@ -37,5 +40,6 @@ public final class LightSettings {
         delayMs = o.delayMs;
         strobe = o.strobe;
         buildups = o.buildups;
+        strobeMode = o.strobeMode;
     }
 }

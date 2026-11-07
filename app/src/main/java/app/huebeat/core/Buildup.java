@@ -27,7 +27,7 @@ public final class Buildup {
     }
 
     /** What the lights show: small swells (a single filter sweep, a fill) stay invisible. */
-    private float shown() {
+    public float shown() {
         return clamp01((build - 0.25f) / 0.65f);
     }
 

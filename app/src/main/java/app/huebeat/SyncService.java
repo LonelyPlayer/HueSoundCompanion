@@ -196,6 +196,9 @@ public class SyncService extends Service {
         DmxRun dmxRun = new DmxRun();
         app.huebeat.core.Shuffle shuffle = new app.huebeat.core.Shuffle();
         app.huebeat.core.Buildup buildup = new app.huebeat.core.Buildup();
+        app.huebeat.core.Cues.Timer lampTimer = new app.huebeat.core.Cues.Timer();
+        float lampFlash = 0f;
+        int lampBeat = 0, lampSnare = 0;
         boolean shuffled = false;
         boolean hue = prefs.isConfigured();
         try {
@@ -402,12 +405,18 @@ public class SyncService extends Service {
                 dmxRun.update(prefs);
                 // Shuffle: the director picks style, palette and effects; everything renders with its picks
                 LightSettings use = ls;
+                // the vibe and build-up are always tracked: the strobes of every output use them
+                if (SyncState.reshuffle) {
+                    SyncState.reshuffle = false;
+                    shuffle.reshuffle();
+                }
+                shuffle.update(f, dt, ls);
+                if (!calibrating) buildup.update(f, dt);
+                app.huebeat.core.Cues.energy = shuffle.energy();
+                app.huebeat.core.Cues.gap = !calibrating && buildup.inGap();
+                app.huebeat.core.Cues.build = calibrating || buildup.inGap() ? 0f : buildup.shown();
+                app.huebeat.core.Cues.impact = calibrating ? 0f : buildup.impact();
                 if (ls.style == LightSettings.STYLE_SHUFFLE) {
-                    if (SyncState.reshuffle) {
-                        SyncState.reshuffle = false;
-                        shuffle.reshuffle();
-                    }
-                    shuffle.update(f, dt, ls);
                     use = shuffle.out;
                     for (int k = 0; k < strips.size(); k++) shuffle.applyStrip(k, strips.get(k));
                     for (Dmx.Fixture fx : dmxRun.out.fixtures) shuffle.applyDmx(fx);
@@ -423,7 +432,6 @@ public class SyncService extends Service {
                     dmxRun.update(prefs);
                 }
                 boolean showBuild = ls.buildups && !calibrating;
-                if (showBuild) buildup.update(f, dt);
                 shuffle.building = showBuild ? buildup.level() : 0f;
                 dmxRun.out.overlay = showBuild ? buildup : null;
                 if (!calibrating && renderer != null) {
@@ -431,6 +439,22 @@ public class SyncService extends Service {
                     if (showBuild) {
                         rgb = rgb.clone(); // the renderer keeps its own frame for smoothing
                         buildup.apply(rgb, rgb.length / 3);
+                    }
+                    // lamp strobe on high intensity / build-ups (Party snares are done by the renderer)
+                    int sm = ls.strobeMode;
+                    if (sm >= 2 && f != null && !f.silent) {
+                        boolean lb = f.beatCount != lampBeat, lsn = f.snareCount != lampSnare;
+                        int cue = sm == 2 ? app.huebeat.core.Cues.HIGH_INTENSITY : sm == 3 ? app.huebeat.core.Cues.BUILDUPS : app.huebeat.core.Cues.BOTH;
+                        if (app.huebeat.core.Cues.fire(cue, lb, lsn, dt, lampTimer)) lampFlash = 1f;
+                    }
+                    if (f != null) {
+                        lampBeat = f.beatCount;
+                        lampSnare = f.snareCount;
+                    }
+                    lampFlash *= (float) Math.exp(-dt / 0.05f);
+                    if (lampFlash > 0.02f) {
+                        if (!showBuild) rgb = rgb.clone();
+                        for (int i = 0; i < rgb.length; i++) rgb[i] += (1f - rgb[i]) * lampFlash;
                     }
                 }
                 if (!calibrating) dmxRun.out.render(f, tSec, dt, use);

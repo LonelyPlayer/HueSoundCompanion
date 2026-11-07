@@ -41,8 +41,11 @@ public final class StripEffect {
         return k >= 0 && k < LedFx.EFFECTS.size() ? LedFx.EFFECTS.get(k).variants : null;
     }
 
-    public static final int STROBE_OFF = 0, STROBE_KICK = 1, STROBE_SNARE = 2, STROBE_BAR = 3, STROBE_BIG = 4;
-    public static final String[] STROBE_TRIGGERS = {"Off", "Kick", "Snare / hi-hat", "Every 4th beat", "Big hits"};
+    public static final int STROBE_OFF = 0, STROBE_KICK = 1, STROBE_SNARE = 2, STROBE_BAR = 3, STROBE_BIG = 4,
+            STROBE_HIGH = 5, STROBE_BUILD = 6, STROBE_HIGH_BUILD = 7;
+    public static final String[] STROBE_TRIGGERS = {"Off", "Kick", "Snare / hi-hat", "Every 4th beat", "Big hits",
+            "High intensity", "Build-ups", "High intensity + build-ups"};
+    private final Cues.Timer cueTimer = new Cues.Timer();
     public static final int COVER_FULL = 0, COVER_BLOCKS = 1, COVER_SPARKLES = 2;
     public static final String[] STROBE_COVERS = {"Whole strip", "Blocks", "Sparkles"};
 
@@ -184,6 +187,9 @@ public final class StripEffect {
                 case STROBE_SNARE: fire = snare; break;
                 case STROBE_BAR: fire = beat && f.beatCount % 4 == 0; break;
                 case STROBE_BIG: fire = beat && f.beatStrength > 0.7f && f.level > 0.55f; break;
+                case STROBE_HIGH: fire = Cues.fire(Cues.HIGH_INTENSITY, beat, snare, dt, cueTimer); break;
+                case STROBE_BUILD: fire = Cues.fire(Cues.BUILDUPS, beat, snare, dt, cueTimer); break;
+                case STROBE_HIGH_BUILD: fire = Cues.fire(Cues.BOTH, beat, snare, dt, cueTimer); break;
                 default: fire = beat; break;
             }
             if (fire) {
