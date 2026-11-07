@@ -56,6 +56,10 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private final List<TextView> paletteChips = new ArrayList<>();
     private boolean pendingStart = false;
     private boolean askedNotif = false;
+    /** Palette editor bookkeeping: which palette is edited (-1 = new) and where the result goes. */
+    private int editingPalette = -1;
+    private Ui.IntSet paletteTarget;
+    private LinearLayout ambPaletteBox;
     private final List<TextView> appModeChips = new ArrayList<>();
     private LinearLayout musicTop, musicLook, ambientLook, lightsList, lampBox;
     private TextView ambAnimBtn, ambColorBtn;
@@ -309,11 +313,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         box.addView(ambAnimBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
 
         box.addView(section("Colors"));
-        box.addView(Ui.chipRow(this, paletteNames(), paletteSwatches(0), () -> a.palette, v -> {
-            a.palette = v;
-            prefs.saveAmbient();
-            rebuildStrips();
-        }));
+        ambPaletteBox = Ui.column(this);
+        box.addView(ambPaletteBox);
+        rebuildAmbientPalettes();
         ambColorBtn = pickerButton("Main color");
         setDot(ambColorBtn, a.color);
         ambColorBtn.setOnClickListener(v -> Pickers.color(this, "Main color", a.color, c -> {
@@ -639,20 +641,33 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 saveStrips();
             }));
             body.addView(Ui.label(this, "Colors"));
-            String[] pal = new String[Palettes.count() + 1];
-            pal[0] = "Same as lights";
-            for (int k = 0; k < Palettes.count(); k++) pal[k + 1] = Palettes.name(k);
-            android.graphics.drawable.Drawable[] palIcons = paletteSwatches(1);
-            palIcons[0] = swatch(amb ? prefs.ambient.palette : prefs.light.palette);
-            body.addView(Ui.chipRow(this, pal, palIcons, () -> st.palette + 1, v -> {
-                st.palette = v - 1;
+            body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> st.palette, v -> {
+                st.palette = v;
                 saveStrips();
             }));
             body.addView(Ui.label(this, "Brightness"));
-            body.addView(Ui.slider(this, st.brightness, v -> {
+            android.widget.SeekBar ownBright = Ui.slider(this, st.brightness, v -> {
                 st.brightness = Math.max(0.03f, v);
                 saveStrips();
+            });
+            TextView brightHint = Ui.text(this, "", 13, Ui.SUB, false);
+            Runnable showBright = () -> {
+                ownBright.setVisibility(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS ? View.GONE : View.VISIBLE);
+                String lightsSlider = amb ? "the Brightness slider under Lights" : "Max brightness under Look";
+                brightHint.setText(st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_OWN
+                        ? "Only this slider sets the strip's brightness."
+                        : st.brightnessMode == app.huebeat.core.StripOutput.BRIGHT_LIGHTS
+                        ? "The strip follows " + lightsSlider + "."
+                        : "This slider and " + lightsSlider + " both dim the strip.");
+            };
+            body.addView(Ui.chipRow(this, new String[]{"Own + lights", "Own only", "Follow lights"}, () -> st.brightnessMode, v -> {
+                st.brightnessMode = v;
+                saveStrips();
+                showBright.run();
             }));
+            body.addView(brightHint, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 6), 0, 0));
+            body.addView(ownBright);
+            showBright.run();
 
             if (!amb) {
             body.addView(Ui.label(this, "Strobe overlay"));
@@ -771,8 +786,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             });
             if (Palettes.isCustom(i)) {
                 chip.setOnLongClickListener(v -> {
-                    startActivityForResult(new Intent(this, PaletteEditorActivity.class)
-                            .putExtra(PaletteEditorActivity.EXTRA_INDEX, p), REQ_EDIT_PALETTE);
+                    editPalette(p, this::selectLightsPalette);
                     return true;
                 });
             }
@@ -781,8 +795,78 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }
         TextView add = Ui.chip(this, "+ New");
         add.setTextColor(Ui.ACCENT);
-        add.setOnClickListener(v -> startActivityForResult(new Intent(this, PaletteEditorActivity.class), REQ_EDIT_PALETTE));
+        add.setOnClickListener(v -> editPalette(-1, this::selectLightsPalette));
         palettesRow.addView(add, Ui.lp(Ui.WRAP, Ui.WRAP));
+    }
+
+    private void selectLightsPalette(int p) {
+        prefs.light.palette = p;
+        prefs.light.screenColors = false;
+        prefs.saveLight();
+    }
+
+    /** Opens the palette editor; the saved palette is then picked through {@code target}. */
+    private void editPalette(int index, Ui.IntSet target) {
+        editingPalette = index;
+        paletteTarget = target;
+        Intent i = new Intent(this, PaletteEditorActivity.class);
+        if (index >= 0) i.putExtra(PaletteEditorActivity.EXTRA_INDEX, index);
+        startActivityForResult(i, REQ_EDIT_PALETTE);
+    }
+
+    /**
+     * A palette row with color previews: custom palettes can be edited with a long press and
+     * "+ New" makes one. With {@code withSame}, the first chip is "Same as lights" (value -1).
+     */
+    private View paletteRow(boolean withSame, int samePalette, Ui.IntGet get, Ui.IntSet set) {
+        final int off = withSame ? 1 : 0;
+        String[] names = new String[Palettes.count() + off];
+        if (withSame) names[0] = "Same as lights";
+        for (int k = 0; k < Palettes.count(); k++) names[k + off] = Palettes.name(k);
+        android.graphics.drawable.Drawable[] icons = paletteSwatches(off);
+        if (withSame) icons[0] = swatch(samePalette);
+        android.view.ViewGroup hs = (android.view.ViewGroup) Ui.chipRow(this, names, icons, () -> get.get() + off, v -> set.set(v - off));
+        LinearLayout row = (LinearLayout) hs.getChildAt(0);
+        for (int k = 0; k < Palettes.count(); k++) {
+            if (!Palettes.isCustom(k)) continue;
+            final int pk = k;
+            row.getChildAt(k + off).setOnLongClickListener(v -> {
+                editPalette(pk, set);
+                return true;
+            });
+        }
+        TextView add = Ui.chip(this, "+ New");
+        add.setTextColor(Ui.ACCENT);
+        add.setOnClickListener(v -> editPalette(-1, set));
+        row.addView(add, Ui.lp(Ui.WRAP, Ui.WRAP));
+        return hs;
+    }
+
+    private void rebuildAmbientPalettes() {
+        if (ambPaletteBox == null) return;
+        ambPaletteBox.removeAllViews();
+        Ambient.Settings a = prefs.ambient;
+        ambPaletteBox.addView(paletteRow(false, 0, () -> a.palette, v -> {
+            a.palette = v;
+            prefs.saveAmbient();
+            rebuildStrips();
+        }));
+    }
+
+    /** A palette was deleted: everything pointing past it moves down one, anything using it falls back. */
+    private void paletteDeleted(int d) {
+        prefs.light.palette = shiftPalette(prefs.light.palette, d, 0);
+        prefs.saveLight();
+        prefs.ambient.palette = shiftPalette(prefs.ambient.palette, d, 0);
+        prefs.saveAmbient();
+        List<Strip> list = prefs.strips();
+        for (Strip st : list) if (st.palette >= 0) st.palette = shiftPalette(st.palette, d, -1);
+        prefs.saveStrips(list);
+    }
+
+    private static int shiftPalette(int p, int deleted, int fallback) {
+        if (p == deleted) return fallback;
+        return p > deleted ? p - 1 : p;
     }
 
     /** Swatches for every palette, shifted by {@code offset} empty slots in front. */
@@ -1028,11 +1112,15 @@ public class MainActivity extends Activity implements SyncState.Listener {
             if (resultCode == RESULT_OK && data != null) {
                 int idx = data.getIntExtra(PaletteEditorActivity.EXTRA_INDEX, -1);
                 if (idx >= 0) {
-                    prefs.light.palette = idx;
-                    prefs.saveLight();
+                    if (paletteTarget != null) paletteTarget.set(idx); // pick it where it was made
+                } else if (editingPalette >= 0) {
+                    paletteDeleted(editingPalette);
                 }
             }
+            paletteTarget = null;
+            editingPalette = -1;
             rebuildPalettes();
+            rebuildAmbientPalettes();
             rebuildStrips();
             refresh();
         }

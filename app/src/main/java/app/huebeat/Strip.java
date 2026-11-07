@@ -13,6 +13,8 @@ final class Strip {
     boolean mirror = false;
     boolean reverse = false;
     float brightness = 1f;
+    /** Which slider sets the strip's brightness: StripOutput.BRIGHT_BOTH / BRIGHT_OWN / BRIGHT_LIGHTS. */
+    int brightnessMode = 0;
     boolean enabled = true;
     boolean wled = false;  // found as a WLED device
     // effect
@@ -40,7 +42,8 @@ final class Strip {
                 .put("strobeLength", (double) strobeLength).put("strobeCover", strobeCover)
                 .put("strobeAmount", (double) strobeAmount)
                 .put("variant", variant).put("blur", (double) blur)
-                .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor);
+                .put("ambientEffect", ambientEffect).put("ambientColor", ambientColor)
+                .put("brightnessMode", brightnessMode);
     }
 
     /** Everything that needs a new network output when it changes. */
@@ -52,6 +55,7 @@ final class Strip {
     void applyLive(app.huebeat.core.StripOutput so) {
         so.palette = palette;
         so.brightness = brightness;
+        so.brightnessMode = brightnessMode;
         so.effect.effect = effect;
         so.effect.speed = speed;
         so.effect.strobeTrigger = strobeTrigger;
@@ -97,6 +101,7 @@ final class Strip {
         s.blur = (float) o.optDouble("blur", 0.0);
         s.ambientEffect = o.optInt("ambientEffect", -1);
         s.ambientColor = o.optInt("ambientColor", 0xFF8A2A);
+        s.brightnessMode = Math.max(0, Math.min(2, o.optInt("brightnessMode", 0)));
         return s;
     }
 }

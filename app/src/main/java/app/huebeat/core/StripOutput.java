@@ -37,8 +37,13 @@ public final class StripOutput {
     private final InetAddress address;
     private final int port, protocol, universe;
     private final boolean mirror, reverse;
-    /** 0..1, may be changed live. */
+    /** The strip's own brightness slider, 0..1, may be changed live. */
     public volatile float brightness;
+    /** Which slider sets the brightness: the strip's own and the lights' together, only the own, only the lights'. */
+    public static final int BRIGHT_BOTH = 0, BRIGHT_OWN = 1, BRIGHT_LIGHTS = 2;
+    public volatile int brightnessMode = BRIGHT_BOTH;
+    /** The lights' brightness for the current frame (music: max brightness, just lights: brightness). */
+    private float lightsLevel = 1f;
     private final int span;
     private final StripProtocol proto = new StripProtocol();
     private final float[] logical;
@@ -86,13 +91,15 @@ public final class StripOutput {
 
     /** Renders one frame into the logical pixels and returns them (rgb 0..1). */
     public float[] render(Features f, double t, float dt, LightSettings lights) {
-        LightSettings s = lights;
+        // brightness is applied once at the end (see brightnessMode), not inside the effect
+        own.copyFrom(lights);
+        own.maxBrightness = 1f;
+        lightsLevel = lights.maxBrightness;
         if (palette >= 0) {
-            own.copyFrom(lights);
             own.palette = Math.min(palette, Palettes.count() - 1);
             own.screenColors = false;
-            s = own;
         }
+        LightSettings s = own;
         if (effect.effect == StripEffect.LIGHTS) {
             float[] seg = renderer.render(f, t, dt, s);
             upsample(seg, segments, logical, span);
@@ -113,6 +120,8 @@ public final class StripOutput {
         if (palette >= 0) ambientOwn.palette = palette;
         ambientOwn.color = ambientColor;
         ambientOwn.speed = effect.speed;
+        ambientOwn.brightness = 1f;
+        lightsLevel = lights.brightness;
         float[] px = ambient.render(dt, ambientOwn, null);
         System.arraycopy(px, 0, logical, 0, logical.length);
         applyBlur();
@@ -129,6 +138,7 @@ public final class StripOutput {
 
     /** Shows one plain color (used during the room-light calibration). */
     public float[] fill(float[] c) {
+        lightsLevel = 1f;
         for (int i = 0; i < span; i++) {
             logical[3 * i] = c[0];
             logical[3 * i + 1] = c[1];
@@ -173,6 +183,9 @@ public final class StripOutput {
     /** Maps the logical frame onto the physical LEDs (mirror, reverse), brightness and gamma. */
     byte[] buildPixels(float[] lg, boolean dithered) {
         float half = (leds - 1) / 2f;
+        float own = Math.max(0f, Math.min(1f, brightness)), lit = Math.max(0f, Math.min(1f, lightsLevel));
+        int mode = brightnessMode;
+        float level = mode == BRIGHT_OWN ? own : mode == BRIGHT_LIGHTS ? lit : own * lit;
         for (int p = 0; p < leds; p++) {
             float t;
             if (mirror) t = half <= 0 ? 0f : Math.abs(p - half) / half; // 0 = centre, 1 = ends
@@ -184,7 +197,7 @@ public final class StripOutput {
             float maxWant = 0f;
             for (int k = 0; k < 3; k++) {
                 float v = lg[3 * a + k] * (1 - f) + lg[3 * b + k] * f;
-                v = Math.max(0f, Math.min(1f, v)) * Math.max(0f, Math.min(1f, brightness));
+                v = Math.max(0f, Math.min(1f, v)) * level;
                 // WS2812-type LEDs are linear; the frames are perceptual → extra gamma
                 want[k] = (float) Math.pow(v, 1.6) * 255f;
                 maxWant = Math.max(maxWant, want[k]);
