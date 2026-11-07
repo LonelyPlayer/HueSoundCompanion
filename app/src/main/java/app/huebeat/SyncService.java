@@ -61,6 +61,8 @@ public class SyncService extends Service {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean running = false;
+    /** Every start gets a new number; an engine whose number is no longer current stops at once. */
+    private volatile int generation = 0;
     private Thread engineThread;
     private MediaProjection projection;
     private PowerManager.WakeLock wakeLock;
@@ -126,9 +128,10 @@ public class SyncService extends Service {
         acquireLocks();
         running = true;
         final MediaProjection fmp = mp;
+        final int gen = ++generation;
         engineThread = new Thread(() -> {
-            if (ambient) runAmbient();
-            else runEngine(mode, fmp);
+            if (ambient) runAmbient(gen);
+            else runEngine(mode, fmp, gen);
         }, "huebeat-engine");
         engineThread.start();
         return START_NOT_STICKY;
@@ -153,6 +156,7 @@ public class SyncService extends Service {
 
     private void stopEngine() {
         running = false;
+        generation++;
         Thread t = engineThread;
         engineThread = null;
         if (t != null && t != Thread.currentThread()) {
@@ -173,7 +177,11 @@ public class SyncService extends Service {
 
     // ------------------------------------------------------------------ engine
 
-    private void runEngine(int mode, MediaProjection mp) {
+    private boolean alive(int gen) {
+        return running && gen == generation;
+    }
+
+    private void runEngine(int mode, MediaProjection mp, int gen) {
         Prefs prefs = Prefs.get(this);
         String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey(), area = prefs.areaId();
         AudioRecord rec = null;
@@ -206,7 +214,7 @@ public class SyncService extends Service {
             rec.startRecording();
             audioThread = new Thread(() -> {
                 short[] buf = new short[960];
-                while (running) {
+                while (alive(gen)) {
                     int n = frec.read(buf, 0, buf.length);
                     if (n > 0) analyzer.push(buf, n, System.nanoTime());
                     else if (n < 0) break;
@@ -246,7 +254,7 @@ public class SyncService extends Service {
             int lightPos = 0;
             CameraColors.Calibrator calibrator = null;
             long lastCalFrame = 0;
-            while (running) {
+            while (alive(gen)) {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
@@ -412,7 +420,7 @@ public class SyncService extends Service {
                     try {
                         strips.get(k).send(stripSock, stripRgb[k]);
                     } catch (IOException e) {
-                        if (!running) break;
+                        if (!alive(gen)) break;
                         // a strip that's switched off or out of Wi-Fi range shouldn't stop the rest
                     }
                 }
@@ -420,7 +428,7 @@ public class SyncService extends Service {
                     dtls.send(stream.build(ch.ids, rgb));
                     failures = 0;
                 } catch (IOException e) {
-                    if (!running) break;
+                    if (!alive(gen)) break;
                     if (++failures > 3) throw e;
                     SyncState.set(SyncState.Status.STARTING, "Reconnecting…");
                     try { dtls.close(); } catch (Exception ignored) { }
@@ -478,9 +486,9 @@ public class SyncService extends Service {
             // stopping
         } catch (Exception e) {
             final String msg = friendly(e);
-            if (running) main.post(() -> shutdown(msg));
+            if (alive(gen)) main.post(() -> shutdown(msg));
         } finally {
-            running = false;
+            if (gen == generation) running = false;
             if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
             if (screen != null) screen.stop();
@@ -510,7 +518,7 @@ public class SyncService extends Service {
     // ------------------------------------------------------------------ ambient mode
 
     /** Lights without music: palettes, single colors per lamp and calm animations. */
-    private void runAmbient() {
+    private void runAmbient(int gen) {
         Prefs prefs = Prefs.get(this);
         String ip = prefs.bridgeIp(), user = prefs.username(), key = prefs.clientKey(), area = prefs.areaId();
         DtlsPskClient dtls = null;
@@ -561,7 +569,7 @@ public class SyncService extends Service {
 
             long last = System.nanoTime(), nextFrame = last;
             int failures = 0;
-            while (running) {
+            while (alive(gen)) {
                 long now = System.nanoTime();
                 float dt = Math.min(0.1f, (now - last) / 1e9f);
                 last = now;
@@ -595,14 +603,14 @@ public class SyncService extends Service {
                     try {
                         so.send(stripSock, so.renderAmbient(dt, as));
                     } catch (IOException e) {
-                        if (!running) break;
+                        if (!alive(gen)) break;
                     }
                 }
                 if (hue) try {
                     dtls.send(stream.build(ch.ids, hueRgb));
                     failures = 0;
                 } catch (IOException e) {
-                    if (!running) break;
+                    if (!alive(gen)) break;
                     if (++failures > 3) throw e;
                     SyncState.set(SyncState.Status.STARTING, "Reconnecting…");
                     try { dtls.close(); } catch (Exception ignored) { }
@@ -630,9 +638,9 @@ public class SyncService extends Service {
             finished = true;
         } catch (Exception e) {
             final String msg = friendly(e);
-            if (running) main.post(() -> shutdown(msg));
+            if (alive(gen)) main.post(() -> shutdown(msg));
         } finally {
-            running = false;
+            if (gen == generation) running = false;
             Thread.interrupted(); // the network calls below must not be cut short
             if (dtls != null) dtls.close();
             if (streamingStarted) {

@@ -43,11 +43,12 @@ public final class StripOutput {
     private final StripProtocol proto = new StripProtocol();
     private final float[] logical;
     private final byte[] pixels;
-    /** Rounding error carried to the next frame per LED channel (temporal dithering). */
-    private final float[] dither;
-    /** Per LED channel: the value it was last moving from, and for how many frames it has stood still. */
+    /** Temporal dithering: per LED a threshold that walks through 0..1, the level it last moved
+     *  from, and how many frames it has stood still. */
+    private final float[] phase;
     private final float[] ditherRef;
     private final int[] still;
+    private final float[] want = new float[3];
     private static final int STILL_FRAMES = 50; // 1 s at 50 fps
 
     public StripOutput(String name, InetAddress address, int protocol, int leds, int universe,
@@ -69,12 +70,12 @@ public final class StripOutput {
         effect = new StripEffect(span);
         logical = new float[3 * span];
         pixels = new byte[3 * this.leds];
-        dither = new float[3 * this.leds];
-        ditherRef = new float[3 * this.leds];
-        still = new int[3 * this.leds];
+        phase = new float[this.leds];
+        ditherRef = new float[this.leds];
+        still = new int[this.leds];
         // different start offsets per LED, so neighbours step at different moments (no strip-wide pulsing)
         java.util.Random rnd = new java.util.Random(1);
-        for (int i = 0; i < dither.length; i++) dither[i] = rnd.nextFloat() - 0.5f;
+        for (int i = 0; i < phase.length; i++) phase[i] = rnd.nextFloat();
     }
 
     /** Screen / camera colors for this strip's segments (rgb per segment), or null. */
@@ -180,31 +181,35 @@ public final class StripOutput {
             float s = t * (span - 1);
             int a = Math.min(span - 1, (int) s), b = Math.min(span - 1, a + 1);
             float f = s - a;
+            float maxWant = 0f;
             for (int k = 0; k < 3; k++) {
                 float v = lg[3 * a + k] * (1 - f) + lg[3 * b + k] * f;
                 v = Math.max(0f, Math.min(1f, v)) * Math.max(0f, Math.min(1f, brightness));
                 // WS2812-type LEDs are linear; the frames are perceptual → extra gamma
-                float want = (float) Math.pow(v, 1.6) * 255f;
-                int o;
-                int q = 3 * p + k;
-                if (dithered) {
-                    // a channel that hasn't moved by a quarter level for a second is a still image
-                    if (Math.abs(want - ditherRef[q]) > 0.25f) {
-                        ditherRef[q] = want;
-                        still[q] = 0;
-                    } else if (still[q] < STILL_FRAMES) {
-                        still[q]++;
-                    }
+                want[k] = (float) Math.pow(v, 1.6) * 255f;
+                maxWant = Math.max(maxWant, want[k]);
+            }
+            boolean dither = false;
+            if (dithered) {
+                // an LED that hasn't moved by a quarter level for a second is a still image: no dithering
+                if (Math.abs(maxWant - ditherRef[p]) > 0.25f) {
+                    ditherRef[p] = maxWant;
+                    still[p] = 0;
+                } else if (still[p] < STILL_FRAMES) {
+                    still[p]++;
                 }
-                if (dithered && want > 0.02f && still[q] < STILL_FRAMES) {
-                    // 8 bits are too coarse for slow fades in the dark: alternate between the two
-                    // neighbouring levels so the average over a few frames hits the exact value
-                    float x = want + dither[3 * p + k];
-                    o = Math.max(0, Math.min(255, Math.round(x)));
-                    dither[3 * p + k] = Math.max(-0.5f, Math.min(0.5f, x - o));
-                } else {
-                    o = Math.round(want);
-                }
+                // in the very dark, switching levels would change the hue visibly: leave it off there
+                dither = still[p] < STILL_FRAMES && maxWant >= 3f;
+            }
+            // one threshold for all three channels of an LED, so they step up and down together and
+            // the hue stays put; it walks through 0..1 (golden ratio) so the average hits the exact value
+            float th = 0.5f;
+            if (dither) {
+                phase[p] = (phase[p] + 0.618034f) % 1f;
+                th = phase[p];
+            }
+            for (int k = 0; k < 3; k++) {
+                int o = Math.max(0, Math.min(255, (int) Math.floor(want[k] + th)));
                 pixels[3 * p + k] = (byte) o;
             }
         }
