@@ -60,15 +60,15 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 
 ## First start
 
-1. LightBox finds your bridge on the Wi-Fi (or type its IP).
-2. Press the round link button on the bridge. LightBox connects automatically.
-3. Pick your **entertainment area**. If you don't have one, create it in the Hue app under *Settings › Entertainment areas* with your color lights.
+1. Under **Hue lamps** tap **+ Add Hue lamps**. The screen shows the bridges on your Wi-Fi (or type the IP); tap yours and press the round link button on the bridge.
+2. Below, tick the lamps that should play along and tap **Add**. The ⚙ on a lamp card opens the same screen to rename, blink or remove it, or to switch to another bridge. LED strips and DMX lights are added the same way in their sections.
+3. Place the lights on the **room plan**.
 4. Tap the big button. Android asks once for the microphone permission (it's also required for phone-audio capture) and, for phone/app audio, shows a "start recording or casting" prompt each session. That's Android's standard consent for capturing audio; LightBox records nothing and keeps no audio, it only measures it.
 
 ## Good to know
 
 - **Some apps block audio capture** (Spotify and SoundCloud, for example). LightBox notices when music plays but nothing arrives, and switches automatically to Android's music visualizer, which still sees the overall output. It's a bit coarser (about 20 snapshots per second instead of the full audio) and may not work on every phone or while the screen is off. If neither works, use **Microphone**.
-- While LightBox streams, the lights in that entertainment area can't be controlled by other apps. Tap the button again to give them back.
+- While LightBox streams, its lamps can't be controlled by other apps. Tap the button again to give them back.
 - Only one entertainment area can stream per bridge at a time; a running Hue Sync session will be replaced.
 - The bridge is contacted over your local network only. LightBox accepts the bridge's own certificate (Hue bridges use a self-signed Signify certificate).
 - **Photosensitivity:** Party style with strobe enabled produces fast flashes.
@@ -93,7 +93,8 @@ Open the project folder in Android Studio, connect the phone with USB debugging 
 | `core/StripOutput.java` | Renders effects on strip segments, interpolates to every LED, gamma, sends |
 | `StripSetupActivity.java` | WLED discovery (mDNS + /json/info) and strip settings |
 | `SyncService.java` | Foreground service: audio capture → analysis → 50 packets/s to the bridge |
-| `HueApi.java` | Bridge discovery, pairing, entertainment areas, start/stop |
+| `HueSetupActivity.java` | Hue screen: bridge search and pairing, adding and editing lamps |
+| `HueApi.java` | Bridge discovery, pairing, lamps, the app's own entertainment configuration, start/stop |
 
 ## License and credits
 

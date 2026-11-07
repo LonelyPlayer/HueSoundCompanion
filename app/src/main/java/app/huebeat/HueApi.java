@@ -535,6 +535,11 @@ public final class HueApi {
         request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, body, true);
     }
 
+    /** Lets a lamp blink a few times so it can be found in the room. */
+    public static void identify(String ip, String appKey, String lightId) throws IOException {
+        request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, "{\"identify\":{\"action\":\"identify\"}}", true);
+    }
+
     /** Switches a Hue light on or off through the normal API. */
     public static void setLightOn(String ip, String appKey, String lightId, boolean on) throws IOException {
         request("PUT", "https://" + ip + "/clip/v2/resource/light/" + lightId, appKey, "{\"on\":{\"on\":" + on + "}}", true);

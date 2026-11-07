@@ -73,9 +73,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
         super.onCreate(b);
         prefs = Prefs.get(this);
         buildUi();
-        if (!prefs.hasOutputs() && b == null) {
-            startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
-        }
     }
 
     @Override
@@ -111,11 +108,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
         LinearLayout header = Ui.row(this);
         TextView title = Ui.text(this, "LightBox", 22, Ui.TEXT, true);
         header.addView(title, Ui.lp(0, Ui.WRAP, 1));
-        TextView setup = Ui.text(this, "Setup", 14, Ui.SUB, true);
-        setup.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 12), Ui.dp(this, 8));
-        Ui.clickable(setup, Ui.CARD_2, Ui.dp(this, 16));
-        setup.setOnClickListener(v -> startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP));
-        header.addView(setup);
         root.addView(header, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, Ui.dp(this, 18)));
 
         // what the app does: follow music, or just light the room
@@ -600,8 +592,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
         hueBox.removeAllViews();
         hueList = prefs.hueLamps();
         if (!prefs.isPaired()) {
-            TextView t = Ui.button(this, "Connect a Hue bridge", false);
-            t.setOnClickListener(v -> startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP));
+            TextView t = Ui.button(this, "+ Add Hue lamps", false);
+            t.setOnClickListener(v -> addHueLamps());
             hueBox.addView(t, Ui.lp(Ui.MATCH, Ui.WRAP));
             return;
         }
@@ -614,13 +606,15 @@ public class MainActivity extends Activity implements SyncState.Listener {
         }
         java.util.Set<String> shown = new java.util.HashSet<>();
         for (int i = 0; i < hueList.size(); i++) {
+            final int idx = i;
             final HueLamp h = hueList.get(i);
             if (!h.group.isEmpty()) {
                 if (shown.add(h.group)) hueBox.addView(hueGroupCard(h.group), Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, 0, 0, Ui.dp(this, 10)));
                 continue;
             }
             TextView[] title = new TextView[1];
-            LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> hueLampDialog(h), h.enabled, (bv, checked) -> {
+            LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> startActivityForResult(new Intent(this, HueSetupActivity.class)
+                    .putExtra(HueSetupActivity.EXTRA_INDEX, idx), REQ_SETUP), h.enabled, (bv, checked) -> {
                 h.enabled = checked;
                 saveHue(true);
             }, title);
@@ -793,105 +787,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
         return c[0];
     }
 
-    /** Rename or remove a lamp. */
-    private void hueLampDialog(HueLamp h) {
-        android.widget.EditText field = new android.widget.EditText(this);
-        field.setText(h.name);
-        field.setSingleLine(true);
-        field.setTextColor(Ui.TEXT);
-        LinearLayout box = Ui.column(this);
-        int p = Ui.dp(this, 20);
-        box.setPadding(p, Ui.dp(this, 8), p, 0);
-        box.addView(field);
-        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Hue lamp")
-                .setView(box)
-                .setPositiveButton("Rename", (d, w) -> {
-                    String n = field.getText().toString().trim();
-                    if (!n.isEmpty()) h.name = n;
-                    saveHue(false);
-                    rebuildHue();
-                })
-                .setNeutralButton("Remove", (d, w) -> {
-                    hueList.remove(h);
-                    saveHue(true);
-                    rebuildHue();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    /** Lists the bridge's lamps that can stream and adds the chosen ones as devices. */
+    /** The Hue screen: bridge and the lamps to add (like the Art-Net screen). */
     private void addHueLamps() {
-        if (!prefs.isPaired()) {
-            startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
-            return;
-        }
-        final String ip = prefs.bridgeIp(), user = prefs.username();
-        android.widget.Toast.makeText(this, "Looking for lamps…", android.widget.Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            List<HueApi.Lamp> found;
-            String err = null;
-            try {
-                found = HueApi.listLamps(ip, user);
-            } catch (Exception e) {
-                found = new ArrayList<>();
-                err = e.getMessage();
-            }
-            final List<HueApi.Lamp> all = found;
-            final String error = err;
-            main.post(() -> {
-                if (isFinishing()) return;
-                java.util.Set<String> have = new java.util.HashSet<>();
-                for (HueLamp h : hueList) have.add(h.entService);
-                List<HueApi.Lamp> fresh = new ArrayList<>();
-                for (HueApi.Lamp l : all) if (!have.contains(l.entService)) fresh.add(l);
-                if (fresh.isEmpty()) {
-                    android.widget.Toast.makeText(this, error != null ? "Couldn't reach the bridge: " + error
-                            : "All lamps that can stream are added already.", android.widget.Toast.LENGTH_LONG).show();
-                    return;
-                }
-                String[] names = new String[fresh.size()];
-                boolean[] checked = new boolean[fresh.size()];
-                for (int i = 0; i < names.length; i++) {
-                    names[i] = fresh.get(i).name + (fresh.get(i).segments > 1 ? " (gradient)" : "");
-                    checked[i] = true;
-                }
-                new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                        .setTitle("Add Hue lamps")
-                        .setMultiChoiceItems(names, checked, (d, w, c) -> checked[w] = c)
-                        .setPositiveButton("Add", (d, w) -> {
-                            List<HueApi.Lamp> chosen = new ArrayList<>();
-                            for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(fresh.get(i));
-                            for (int i = 0; i < chosen.size(); i++) {
-                                HueApi.Lamp l = chosen.get(i);
-                                HueLamp h = new HueLamp();
-                                h.name = l.name;
-                                h.lightId = l.lightId;
-                                h.entService = l.entService;
-                                h.segments = l.segments;
-                                if (l.hasPosition) {
-                                    h.x = l.x;
-                                    h.y = l.y;
-                                    h.z = l.z;
-                                    h.x2 = l.x2;
-                                    h.y2 = l.y2;
-                                } else {
-                                    // along the front wall until placed on the room plan
-                                    h.x = chosen.size() == 1 ? 0f : -0.8f + 1.6f * i / (chosen.size() - 1);
-                                    h.y = 0.8f;
-                                    h.x2 = h.x + (h.gradient() ? 0.3f : 0f);
-                                    h.y2 = h.y;
-                                }
-                                hueList.add(h);
-                            }
-                            saveHue(true);
-                            rebuildHue();
-                        })
-                        .setNegativeButton("Cancel", null)
-                        .show();
-            });
-        }, "hue-lamps").start();
+        startActivityForResult(new Intent(this, HueSetupActivity.class), REQ_SETUP);
     }
 
     /**
@@ -1841,7 +1739,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 break;
             default:
                 status.setTextColor(Ui.SUB);
-                status.setText(!prefs.hasOutputs() ? (prefs.isPaired() ? "Tap to add your Hue lamps" : "Tap to connect your Hue bridge")
+                status.setText(!prefs.hasOutputs() ? "Tap to add your lights"
                         : amb ? "Tap to turn your lights on" : "Tap to sync your lights");
                 hint.setText("");
         }
@@ -1908,9 +1806,9 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private void startFlow() {
         if (!prefs.hasOutputs()) {
-            // a bridge without lamps yet: pick them; otherwise connect a bridge first
-            if (prefs.isPaired() && prefs.hueLamps().isEmpty()) addHueLamps();
-            else startActivityForResult(new Intent(this, SetupActivity.class), REQ_SETUP);
+            // nothing to light yet: Hue is the usual start; with other lights set up, one has to be on
+            if (prefs.hueLamps().isEmpty() && prefs.strips().isEmpty() && prefs.dmxLights().isEmpty()) addHueLamps();
+            else android.widget.Toast.makeText(this, "Switch on at least one light below", android.widget.Toast.LENGTH_LONG).show();
             return;
         }
         if (ambientMode()) {
@@ -2007,8 +1905,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
             pendingStart = false;
         } else if (requestCode == REQ_SETUP) {
             if (resultCode == RESULT_OK) {
-                migrateHue();
-                if (prefs.hueLamps().isEmpty()) addHueLamps();
+                rebuildHue();
+                restartIfRunning();
             }
             refresh();
         } else if (requestCode == REQ_ROOM) {

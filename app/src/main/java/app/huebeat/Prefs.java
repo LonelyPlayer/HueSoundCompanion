@@ -182,6 +182,17 @@ public final class Prefs {
     // bridge
     public String bridgeIp() { return sp.getString("bridgeIp", null); }
     public String bridgeName() { return sp.getString("bridgeName", "Hue Bridge"); }
+    public String bridgeId() { return sp.getString("bridgeId", ""); }
+
+    public void setBridgeId(String id) {
+        sp.edit().putString("bridgeId", id == null ? "" : id).apply();
+    }
+
+    /** The bridge got a new IP address (same bridge, same credentials). */
+    public void setBridgeIp(String ip) {
+        sp.edit().putString("bridgeIp", ip).apply();
+    }
+
     public String username() { return sp.getString("username", null); }
     public String clientKey() { return sp.getString("clientKey", null); }
     public String areaId() { return sp.getString("areaId", null); }
