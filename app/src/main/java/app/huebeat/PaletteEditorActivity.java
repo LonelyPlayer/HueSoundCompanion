@@ -82,10 +82,7 @@ public class PaletteEditorActivity extends Activity {
 
         root.addView(label("Hue"));
         hueBar = bar(360);
-        GradientDrawable rainbow = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF00FFFF, 0xFF0000FF, 0xFFFF00FF, 0xFFFF0000});
-        rainbow.setCornerRadius(Ui.dp(this, 6));
-        hueBar.setProgressDrawable(rainbow);
+        hueBar.setProgressDrawable(track(new int[]{0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF00FFFF, 0xFF0000FF, 0xFFFF00FF, 0xFFFF0000}));
         root.addView(hueBar);
         root.addView(label("Saturation"));
         satBar = bar(100);
@@ -141,7 +138,6 @@ public class PaletteEditorActivity extends Activity {
     private SeekBar bar(int max) {
         SeekBar s = new SeekBar(this);
         s.setMax(max);
-        s.setProgressTintList(ColorStateList.valueOf(Ui.ACCENT));
         s.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
         s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -174,7 +170,24 @@ public class PaletteEditorActivity extends Activity {
         redraw();
     }
 
+    /** A slider track showing the colors it picks from (the whole bar, not just the filled part). */
+    private GradientDrawable track(int[] colors) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
+        g.setCornerRadius(Ui.dp(this, 6));
+        g.setSize(Ui.dp(this, 200), Ui.dp(this, 12));
+        return g;
+    }
+
+    /** Saturation and brightness tracks follow the selected color's hue. */
+    private void updateTracks() {
+        if (selected >= hsv.size()) return;
+        float[] h = hsv.get(selected);
+        satBar.setProgressDrawable(track(new int[]{0xFFFFFFFF, Color.HSVToColor(new float[]{h[0], 1f, 1f})}));
+        valBar.setProgressDrawable(track(new int[]{0xFF000000, Color.HSVToColor(new float[]{h[0], h[1], 1f})}));
+    }
+
     private void redraw() {
+        updateTracks();
         int[] cols = new int[Math.max(2, hsv.size() + 1)];
         for (int i = 0; i < hsv.size(); i++) cols[i] = Color.HSVToColor(hsv.get(i));
         cols[cols.length - 1] = cols[0]; // palettes loop around
