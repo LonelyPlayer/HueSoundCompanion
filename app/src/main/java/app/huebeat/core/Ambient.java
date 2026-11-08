@@ -14,7 +14,7 @@ public final class Ambient {
     public static final int STATIC = 0, PALETTE = 1, SINGLE = 2, GRADIENT = 3, FADE = 4, RAINBOW = 5,
             RANDOM_FLASH = 6, PIXELS = 7, CANDLES = 8, FIREPLACE = 9, BREATHING = 10, AURORA = 11, OCEAN = 12,
             STORM = 13, STARS = 14, COLOR_LOOP = 15, LAVA = 16, PARTY = 17;
-    public static final String[] NAMES = {"Static colors", "Palette", "Single Color", "Gradient", "Fade", "Rainbow",
+    public static final String[] NAMES = {"Colors per light", "Palette", "Single Color", "Gradient", "Fade", "Rainbow",
             "Random Flash", "Pixels", "Candles", "Fireplace", "Breathing", "Aurora", "Ocean", "Thunderstorm",
             "Starry night", "Color loop", "Lava", "Party"};
     public static final String[] CATEGORIES = {"Colors", "Colors", "LedFx", "LedFx", "LedFx", "LedFx",

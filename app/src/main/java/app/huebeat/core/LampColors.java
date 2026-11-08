@@ -1,9 +1,9 @@
 package app.huebeat.core;
 
 /**
- * "Just lights", static colors: every device with its own color paints the room around it. Devices
- * that follow the global look take the color at their place: a blend of the colors nearby (closer
- * ones count more), or the main color when nobody has an own color.
+ * "Just lights", Colors per light: every device with its own color paints the room around it. Devices
+ * that follow the global look take the color at their place: the own colors nearby blended with the
+ * main color (closer ones count more), so the main color shows wherever no own color is close.
  */
 public final class LampColors {
     private LampColors() {
@@ -30,12 +30,20 @@ public final class LampColors {
         colors = null;
     }
 
-    /** The color at room place (x, y), or {@code fallback} when no device has an own color. */
+    /** Distance at which a device's own color and the main color count the same. */
+    private static final float REACH = 0.5f;
+
+    /**
+     * The color at room place (x, y): the own colors nearby, and the main color ({@code fallback})
+     * everywhere else, so changing the main color always shows.
+     */
     public static int at(float x, float y, int fallback) {
         float[] px = xs, py = ys;
         int[] pc = colors;
         if (px == null || py == null || pc == null || pc.length == 0) return fallback;
-        float r = 0, g = 0, b = 0, wsum = 0;
+        // the main color is everywhere, the own colors win close to their devices
+        float w0 = 1f / (REACH * REACH * REACH * REACH);
+        float r = w0 * ((fallback >> 16) & 0xFF), g = w0 * ((fallback >> 8) & 0xFF), b = w0 * (fallback & 0xFF), wsum = w0;
         for (int i = 0; i < pc.length; i++) {
             float dx = x - px[i], dy = y - py[i];
             float d2 = dx * dx + dy * dy;

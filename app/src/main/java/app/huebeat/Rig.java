@@ -361,7 +361,10 @@ final class Rig {
             HueLamp h = lamps.get(k);
             if (h.ambientColor >= 0) field.add(new float[]{(h.x + h.x2) / 2f, (h.y + h.y2) / 2f, h.ambientColor});
         }
-        for (DmxLight d : dmxCfg) if (d.ambientColor >= 0) field.add(new float[]{d.x, d.y, d.ambientColor});
+        // (a UV or plain dimmer light can't show its color, so it doesn't color the others either)
+        for (DmxLight d : dmxCfg) {
+            if (d.ambientColor >= 0 && app.huebeat.core.Dmx.hasColor(d.roles)) field.add(new float[]{d.x, d.y, d.ambientColor});
+        }
         for (StripOutput so : strips) {
             if (so.ambientColor >= 0) field.add(new float[]{(so.x1 + so.x2) / 2f, (so.y1 + so.y2) / 2f, so.ambientColor});
         }
