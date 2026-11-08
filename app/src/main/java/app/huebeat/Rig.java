@@ -55,6 +55,9 @@ final class Rig {
     private final Map<Look, int[]> lookIdx = new HashMap<>();
 
     private app.huebeat.core.Devices devs;
+    /** A replaced DMX output that still sends a few black frames to universes no longer in use. */
+    private Dmx.Output retired;
+    private int retiredFrames;
     private int seenStrips = Integer.MIN_VALUE, seenDmx = Integer.MIN_VALUE, seenHue = Integer.MIN_VALUE, seenFlow = Integer.MIN_VALUE;
     private int lastBeat = Integer.MIN_VALUE;
 
@@ -146,8 +149,15 @@ final class Rig {
                     dmxKeys.add(d.layoutKey());
                 }
                 Buildup ov = dmx.overlay;
+                Dmx.Output old = dmx;
                 dmx = new Dmx.Output(fx);
                 dmx.overlay = ov;
+                // switched-off or removed lights go dark (their node would hold the last frame)
+                old.retire(dmx);
+                if (old.hasUniverses()) {
+                    retired = old;
+                    retiredFrames = 12;
+                }
             }
             dmxCfg = cfg;
             groupPlaces();
@@ -432,6 +442,13 @@ final class Rig {
                 // a strip that's switched off or out of Wi-Fi range shouldn't stop the rest
             }
         }
+        if (retired != null) {
+            try {
+                retired.send(sock);
+            } catch (IOException ignored) {
+            }
+            if (--retiredFrames <= 0) retired = null;
+        }
         if (!dmx.isEmpty() && Prefs.testLight == null) {
             try {
                 dmx.send(sock);
@@ -443,10 +460,17 @@ final class Rig {
     void blackoutDmx(DatagramSocket sock) {
         if (dmx.isEmpty() || sock == null) return;
         dmx.blackout();
-        for (int k = 0; k < 3; k++) {
+        // spaced out: a node may skip frames that arrive faster than it outputs DMX (~40 per second)
+        for (int k = 0; k < 6; k++) {
             try {
                 dmx.send(sock);
             } catch (IOException ignored) {
+            }
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
             }
         }
     }

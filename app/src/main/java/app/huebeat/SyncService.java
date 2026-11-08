@@ -504,6 +504,7 @@ public class SyncService extends Service {
             if (alive(gen)) main.post(() -> shutdown(msg));
         } finally {
             if (gen == generation) running = false;
+            Thread.interrupted(); // the black frames below must not be cut short
             rig.blackoutDmx(stripSock);
             if (stripSock != null) stripSock.close();
             if (viz != null) viz.stop();
@@ -631,6 +632,7 @@ public class SyncService extends Service {
         final List<StripOutput> strips = new ArrayList<>(rig.strips);
         new Thread(() -> {
             try (DatagramSocket sock = new DatagramSocket()) {
+                rig.blackoutDmx(sock); // DMX lights dark (again, in case a frame got lost)
                 for (StripOutput so : strips) {
                     float[] black = so.fill(new float[3]);
                     for (int k = 0; k < 3; k++) {
@@ -652,6 +654,12 @@ public class SyncService extends Service {
                         return;
                     }
                     if (SyncState.isActive()) return; // switched on again meanwhile
+                }
+                if (pass == 1) {
+                    try (DatagramSocket sock = new DatagramSocket()) {
+                        rig.blackoutDmx(sock);
+                    } catch (Exception ignored) {
+                    }
                 }
                 for (StripOutput so : strips) {
                     try {

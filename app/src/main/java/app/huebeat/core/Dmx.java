@@ -448,6 +448,20 @@ public final class Dmx {
             for (byte[] u : universes.values()) java.util.Arrays.fill(u, (byte) 0);
         }
 
+        /**
+         * This output is replaced by {@code next}: what's left are the universes nobody sends to any
+         * more (a light switched off or removed), all black. Nodes hold the last frame, so these
+         * get a few black frames instead of just falling silent.
+         */
+        public void retire(Output next) {
+            blackout();
+            universes.keySet().removeIf(next.universes::containsKey);
+        }
+
+        public boolean hasUniverses() {
+            return !universes.isEmpty();
+        }
+
         public float[] meanColor() {
             float[] m = new float[3];
             float[] rgb = lastRgb;
