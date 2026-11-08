@@ -23,6 +23,8 @@ public final class Look {
     private final LightSettings ownLs = new LightSettings();
     private final Ambient.Settings ownAs = new Ambient.Settings();
     private final float[] out;
+    /** How many of the room's lights this look covers (0..1), for fair random picks. */
+    public float share = 1f;
     private int[] cols;
     private float env;
 
@@ -78,6 +80,7 @@ public final class Look {
             ownLs.palette = Math.min(palette, Palettes.count() - 1);
             ownLs.screenColors = false;
         }
+        own.share = share;
         float[] c = own.render(f, t, dt, ownLs);
         spread(c);
         return out;
@@ -95,6 +98,7 @@ public final class Look {
         int k = together == SAME ? 1 : n;
         if (cols == null || cols.length != k) cols = new int[k];
         for (int i = 0; i < k; i++) cols[i] = ambientColor >= 0 ? ambientColor : LampColors.at(px[i], py[i], lights.color);
+        ownAmb.share = share;
         float[] c = ownAmb.render(dt, ownAs, cols);
         spread(c);
         return out;

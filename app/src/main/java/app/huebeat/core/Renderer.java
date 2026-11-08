@@ -12,6 +12,8 @@ public final class Renderer {
     private final float[] target, out;
     private final float[] tmp = new float[3];
     private final Random random = new Random();
+    /** This look's share of the room's lights: random sparkles come that much less often (see Ambient). */
+    public volatile float share = 1f;
     /** The devices behind the points (null: every point is its own). */
     private volatile Devices devices;
 
@@ -212,7 +214,7 @@ public final class Renderer {
             float strength = 0.6f + 0.4f * f.beatStrength;
             for (int i = 0; i < n; i++) env[i] = Math.max(env[i], strength * (0.8f + 0.2f * (i % 2)));
         }
-        if (snare && inten > 0.2f && n > 0) {
+        if (snare && inten > 0.2f && n > 0 && random.nextFloat() < share) {
             int i = pick();
             sparkle[i] = Math.max(sparkle[i], 0.25f + 0.5f * inten);
         }
@@ -262,7 +264,7 @@ public final class Renderer {
                 env[i] = Math.max(env[i], accent ? strength : strength * lerp(0.85f, 0.25f, inten));
             }
         }
-        if (snare && inten > 0.2f && n > 0) {
+        if (snare && inten > 0.2f && n > 0 && random.nextFloat() < share) {
             int i = pick();
             sparkle[i] = Math.max(sparkle[i], 0.3f + 0.6f * inten);
         }
@@ -331,7 +333,7 @@ public final class Renderer {
         if (snare) {
             if (s.strobe && inten > 0.5f) {
                 strobe = 1f;
-            } else if (n > 0) {
+            } else if (n > 0 && random.nextFloat() < share) {
                 int i = pick();
                 sparkle[i] = 0.9f;
             }

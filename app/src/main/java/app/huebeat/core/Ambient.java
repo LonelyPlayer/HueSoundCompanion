@@ -64,10 +64,25 @@ public final class Ambient {
     private float rainbowHue;
     private int pixel;
     private float pixelTimer;
+    /** This animation's share of the room's lights (an own look of one lamp among ten: 0.1). Random
+     *  flashes come that much less often, so a light with its own look doesn't flash more than the rest. */
+    public volatile float share = 1f;
     /** The devices behind the points (the room's scene); null for a single strip. */
     private Devices devices;
     private int[] devOrder;
     private boolean[] stormHit;
+
+    /**
+     * Chance of a new random flash this frame. A flash lasts 0.5 s, and no new one starts meanwhile;
+     * an animation with a smaller {@code share} waits correspondingly longer, so each light ends up
+     * flashing as often as the lights of the shared room animation.
+     */
+    private float flashChance(float dt, float sp) {
+        double rate = -Math.log(1 - 0.1 * 5); // LedFx, per unit of animation time (t runs at the speed)
+        float sh = Math.max(0.01f, Math.min(1f, share));
+        if (sh < 1f) rate = 1.0 / Math.max(1e-3, (1.0 / rate + 0.5) / sh - 0.5);
+        return (float) (1 - Math.exp(-rate * dt * sp));
+    }
 
     /** Random picks and moving pixels then go device by device, so every light gets its turn. */
     public void setDevices(Devices d) {
@@ -170,7 +185,7 @@ public final class Ambient {
                 if (since < 0.5) {
                     float f = (float) (1 - since / 0.5);
                     for (int i = hitStart; i < hitStart + hitLen && i < n; i++) rgb(i, s.color, f);
-                } else if (rnd.nextFloat() < 1 - Math.pow(1 - 0.1 * 5, dt * sp)) {
+                } else if (rnd.nextFloat() < flashChance(dt, sp)) {
                     if (devices != null && devices.count() > 0) {
                         // one light at random; a strip flashes a piece of itself
                         int d = rnd.nextInt(devices.count()), len = devices.len[d];

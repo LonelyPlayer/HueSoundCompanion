@@ -54,6 +54,7 @@ final class Rig {
     private final Map<Look, float[]> frameCache = new HashMap<>();
     private final Map<Look, int[]> lookIdx = new HashMap<>();
 
+    private app.huebeat.core.Devices devs;
     private int seenStrips = Integer.MIN_VALUE, seenDmx = Integer.MIN_VALUE, seenHue = Integer.MIN_VALUE, seenFlow = Integer.MIN_VALUE;
     private int lastBeat = Integer.MIN_VALUE;
 
@@ -231,7 +232,8 @@ final class Rig {
             ds[dq] = dmxOff[k];
             dl[dq] = 1;
         }
-        scene.setDevices(new app.huebeat.core.Devices(ds, dl, n));
+        devs = new app.huebeat.core.Devices(ds, dl, n);
+        scene.setDevices(devs);
         lookIdx.clear();
 
         // Hue lamps: one look per lamp, or one per group over all its members
@@ -298,6 +300,9 @@ final class Rig {
             py[i] = scene.y[ix[i]];
         }
         Look l = new Look(u, px, py);
+        java.util.Set<Integer> own = new java.util.HashSet<>();
+        for (int i : ix) if (devs != null && i < devs.of.length) own.add(devs.of[i]);
+        if (devs != null && devs.count() > 0) l.share = Math.min(1f, (float) Math.max(1, own.size()) / devs.count());
         lookIdx.put(l, ix);
         return l;
     }
