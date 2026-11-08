@@ -28,7 +28,7 @@ Music sync for Philips Hue and LED strips that listens to **everything your phon
   - static colors, with **each lamp's own color** (color picker with hue/saturation/brightness and quick picks),
   - a palette spread over the room, a single color, or one of the animations: Gradient, Fade, Rainbow, Random Flash, Pixels (from LedFx), and new ones: **Candles** (independent flickering per lamp), **Fireplace**, Breathing, Aurora, Ocean, Thunderstorm, Starry night, Color loop, Lava and Party,
   - speed and brightness; each strip can follow the lamps' animation or run its own, in its own color and palette,
-  - **Turning off** (power button) makes every light dark: Hue lamps off, strips black and WLED off, DMX blacked out. With **Keep the colors when turned off** (Just lights) the last colors stay instead.
+  - **Turning off** (power button) makes every light dark: Hue lamps off, strips black and WLED off, DMX blacked out.
 - **One room, all devices.** Hue lamps, LED strips and DMX lights are devices of the same kind:
   - **Global look**: the Look (music) and Lights (just lights) settings are global; every device follows it ("Global") or has its own look (own style, solid color pulsing/steady, own palette, own animation and color).
   - **Hue lamps as devices**: add single lamps from the bridge ("+ Add light" › Hue lamp); the app keeps its own entertainment configuration on the bridge with exactly these lamps and their places (Hue's limit: 10 lamps streaming at once). Entertainment areas are no longer chosen in the app; an old area is converted automatically (lamps, places, colors).

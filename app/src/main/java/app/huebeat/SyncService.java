@@ -54,6 +54,8 @@ public class SyncService extends Service {
     public static final String EXTRA_RESULT_DATA = "resultData";
     /** The screen is needed (screen colors / Screen style), so capture consent was asked even for the microphone. */
     public static final String EXTRA_SCREEN = "screen";
+    /** With ACTION_STOP: turned off by the user, so every light goes dark (not just a restart). */
+    public static final String EXTRA_OFF = "off";
 
     private static final String CHANNEL = "sync";
     private static final int NOTIFICATION_ID = 1;
@@ -69,9 +71,18 @@ public class SyncService extends Service {
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
 
+    /** Stops the sync (e.g. to restart it with new settings); the lights aren't switched off. */
     public static void stop(Context c) {
         c.startService(new Intent(c, SyncService.class).setAction(ACTION_STOP));
     }
+
+    /** The power button: stops and switches every light off, like switching off each device. */
+    public static void turnOff(Context c) {
+        c.startService(new Intent(c, SyncService.class).setAction(ACTION_STOP).putExtra(EXTRA_OFF, true));
+    }
+
+    /** Set by {@link #turnOff}: the stopping engine switches all its lights off. */
+    private volatile boolean darkOnStop;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -82,6 +93,7 @@ public class SyncService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
+            darkOnStop = intent != null && intent.getBooleanExtra(EXTRA_OFF, false);
             shutdown(null);
             return START_NOT_STICKY;
         }
@@ -98,6 +110,7 @@ public class SyncService extends Service {
             return START_NOT_STICKY;
         }
 
+        darkOnStop = false;
         if (running) stopEngine();
 
         MediaProjection mp = null;
@@ -513,7 +526,7 @@ public class SyncService extends Service {
                 }
                 rec.release();
             }
-            lightsOffSoon(prefs, rig);
+            if (darkOnStop) lightsOff(prefs, rig);
         }
     }
 
@@ -584,11 +597,8 @@ public class SyncService extends Service {
             Thread.interrupted(); // the network calls below must not be cut short
             SyncState.problem = "";
             if (link != null) link.close();
-            if (finished && prefs.keepColors()) keepColors(ip, user, rig);
-            else {
-                rig.blackoutDmx(stripSock);
-                lightsOffSoon(prefs, rig);
-            }
+            rig.blackoutDmx(stripSock);
+            if (darkOnStop) lightsOff(prefs, rig);
             if (stripSock != null) stripSock.close();
             Ambient.master = null;
         }
@@ -610,22 +620,16 @@ public class SyncService extends Service {
     }
 
     /**
-     * Turned off: every light goes dark (Hue lamps off, strips black and WLED off; DMX is already
-     * blacked out). Waits a moment first: when the sync only restarts (a setting changed), it's
-     * running again by then and nothing is switched off.
+     * Turned off: every light goes dark, the same as switching each device off — Hue lamps off,
+     * strips black and WLED off (DMX is blacked out by the engine). On its own thread, so slow or
+     * unreachable devices don't hold up the stop.
      */
-    private static void lightsOffSoon(Prefs prefs, Rig rig) {
+    private static void lightsOff(Prefs prefs, Rig rig) {
         final String ip = prefs.bridgeIp(), user = prefs.username();
         final List<String> lamps = new ArrayList<>();
         if (prefs.isPaired()) for (HueLamp h : Rig.streamedLamps(prefs)) if (!h.lightId.isEmpty()) lamps.add(h.lightId);
         final List<StripOutput> strips = new ArrayList<>(rig.strips);
         new Thread(() -> {
-            try {
-                Thread.sleep(1500);
-            } catch (InterruptedException e) {
-                return;
-            }
-            if (SyncState.isActive()) return;
             try (DatagramSocket sock = new DatagramSocket()) {
                 for (StripOutput so : strips) {
                     float[] black = so.fill(new float[3]);
@@ -638,16 +642,28 @@ public class SyncService extends Service {
                 }
             } catch (Exception ignored) {
             }
-            for (StripOutput so : strips) {
-                try {
-                    WledApi.setOn(so.host(), false);
-                } catch (Exception ignored) {
+            // twice: the bridge hands the lamps back their old state when the stream ends, and a
+            // controller may still be busy with the last frames
+            for (int pass = 0; pass < 2; pass++) {
+                if (pass == 1) {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    if (SyncState.isActive()) return; // switched on again meanwhile
                 }
-            }
-            for (String id : lamps) {
-                try {
-                    HueApi.setLightOn(ip, user, id, false);
-                } catch (Exception ignored) {
+                for (StripOutput so : strips) {
+                    try {
+                        WledApi.setOn(so.host(), false);
+                    } catch (Exception ignored) {
+                    }
+                }
+                for (String id : lamps) {
+                    try {
+                        HueApi.setLightOn(ip, user, id, false);
+                    } catch (Exception ignored) {
+                    }
                 }
             }
         }, "lights-off").start();
@@ -662,26 +678,6 @@ public class SyncService extends Service {
             v[i] = Math.max(0f, Math.min(1f, 1f - (rig.scene.z[i] + 1f) / 2f));
         }
         return new float[][]{u, v, new float[3 * n]};
-    }
-
-    /** Leaves the last colors on the lamps and strips after stopping, through their normal APIs. */
-    private static void keepColors(String ip, String user, Rig rig) {
-        for (int k = 0; k < rig.lamps.size(); k++) {
-            HueLamp h = rig.lamps.get(k);
-            if (h.lightId.isEmpty()) continue;
-            float[] c = rig.lampColor(k);
-            try {
-                HueApi.setLightColor(ip, user, h.lightId, c[0], c[1], c[2]);
-            } catch (Exception ignored) {
-            }
-        }
-        for (StripOutput so : rig.strips) {
-            try {
-                WledApi.setColors(so.host(), so.physicalColors());
-            } catch (Exception ignored) {
-                // not a WLED controller, or unreachable
-            }
-        }
     }
 
     private void notifyAmbient(Prefs prefs) {
@@ -801,7 +797,7 @@ public class SyncService extends Service {
         }
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, SyncService.class).setAction(ACTION_STOP),
+        PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, SyncService.class).setAction(ACTION_STOP).putExtra(EXTRA_OFF, true),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat)

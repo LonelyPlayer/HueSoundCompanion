@@ -384,15 +384,6 @@ public class MainActivity extends Activity implements SyncState.Listener {
             a.brightness = Math.max(0.02f, v);
             prefs.saveAmbient();
         }));
-
-        LinearLayout keepRow = Ui.row(this);
-        TextView kt = Ui.text(this, "Keep the colors when turned off", 15, Ui.TEXT, false);
-        keepRow.addView(kt, Ui.lp(0, Ui.WRAP, 1));
-        Switch keep = new Switch(this);
-        keep.setChecked(prefs.keepColors());
-        keep.setOnCheckedChangeListener((bv, on) -> prefs.setKeepColors(on));
-        keepRow.addView(keep);
-        box.addView(keepRow, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 14), 0, 0));
     }
 
     private void onAppModeSelected(int m) {
@@ -1964,7 +1955,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
     private void onPowerClicked() {
         if (SyncState.isActive()) {
-            SyncService.stop(this);
+            SyncService.turnOff(this); // every light goes dark, as if each one were switched off
             SyncState.set(SyncState.Status.OFF, "");
             return;
         }
