@@ -770,6 +770,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             LinearLayout[] c = shell(hueTitle(h), "open_hue_" + h.entService, () -> linkHue(h), () -> startActivityForResult(new Intent(this, HueSetupActivity.class)
                     .putExtra(HueSetupActivity.EXTRA_INDEX, idx), REQ_SETUP), h.enabled, (bv, checked) -> {
                 h.enabled = checked;
+                switchHue(java.util.Collections.singletonList(h), checked);
                 saveHue(true);
             }, title);
             buildHueBody(c[1], h, false, title[0]);
@@ -784,6 +785,26 @@ public class MainActivity extends Activity implements SyncState.Listener {
     }
 
     /** Saves the lamps; {@code members}: the set of streamed lamps changed (a running sync restarts). */
+    /**
+     * A lamp switched off goes dark right away; switched on, it lights up again. While the sync
+     * runs, it restarts and the stream (or, for lamps left out, the new start) takes care of it.
+     */
+    private void switchHue(List<HueLamp> ls, boolean on) {
+        if (!prefs.isPaired() || SyncState.isActive()) return;
+        final String ip = prefs.bridgeIp(), user = prefs.username();
+        final List<String> ids = new ArrayList<>();
+        for (HueLamp h : ls) if (!h.lightId.isEmpty()) ids.add(h.lightId);
+        new Thread(() -> {
+            for (String id : ids) {
+                try {
+                    HueApi.setLightOn(ip, user, id, on);
+                } catch (Exception ignored) {
+                    // bridge not reachable: nothing to switch
+                }
+            }
+        }, "hue-switch").start();
+    }
+
     private void saveHue(boolean members) {
         prefs.saveHueLamps(hueList);
         if (members && SyncState.isActive()) {
@@ -896,6 +917,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                     rebuildHue();
                 }), any, (bv, checked) -> {
                     for (HueLamp m : members) m.enabled = checked;
+                    switchHue(members, checked);
                     saveHue(true);
                 }, null);
         buildHueBody(c[1], lead, true, null);
@@ -915,6 +937,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
             ms.setChecked(m.enabled);
             ms.setOnCheckedChangeListener((bv, ch) -> {
                 m.enabled = ch;
+                switchHue(java.util.Collections.singletonList(m), ch);
                 saveHue(true);
             });
             row.addView(ms);

@@ -104,6 +104,8 @@ final class HueLink {
                 connected = true;
                 wait = 3000;
                 setProblem("");
+                darkenSwitchedOff();
+                long again = System.currentTimeMillis() + 3000; // once more, in case the old stream ended late
                 int failures = 0;
                 while (running) {
                     byte[] p;
@@ -111,6 +113,10 @@ final class HueLink {
                         if (frame == null) lock.wait(1000);
                         p = frame;
                         frame = null;
+                    }
+                    if (again > 0 && System.currentTimeMillis() > again) {
+                        again = 0;
+                        darkenSwitchedOff();
                     }
                     if (p == null) continue;
                     try {
@@ -143,6 +149,22 @@ final class HueLink {
             try {
                 HueApi.setStreaming(ip, user, area, false);
             } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * Lamps switched off in the app aren't in the stream; when the old stream ends, the bridge
+     * gives them back their earlier state. So they're switched off here, once streaming runs.
+     */
+    private void darkenSwitchedOff() {
+        java.util.Set<String> streamed = new java.util.HashSet<>();
+        for (HueLamp h : lamps) streamed.add(h.entService);
+        for (HueLamp h : prefs.hueLamps()) {
+            if (h.enabled || streamed.contains(h.entService) || h.lightId.isEmpty()) continue;
+            try {
+                HueApi.setLightOn(ip, user, h.lightId, false);
+            } catch (IOException ignored) {
             }
         }
     }
