@@ -65,6 +65,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
     private int editingPalette = -1;
     private Ui.IntSet paletteTarget;
     private LinearLayout ambPaletteBox;
+    private View ambColorsLabel;
     private final List<TextView> appModeChips = new ArrayList<>();
     private LinearLayout musicTop, musicLook, ambientLook;
     private TextView ambAnimBtn, ambColorBtn;
@@ -332,6 +333,14 @@ public class MainActivity extends Activity implements SyncState.Listener {
         return pal;
     }
 
+    /** Global Just-lights look: palette and main color only where the animation uses them. */
+    private void showAmbientColors() {
+        if (ambPaletteBox == null || ambColorBtn == null) return;
+        int an = prefs.ambient.animation;
+        ambVisibility(ambColorBtn, ambPaletteBox, an);
+        ambColorsLabel.setVisibility(Ambient.usesColor(an) || Ambient.usesPalette(an) ? View.VISIBLE : View.GONE);
+    }
+
     private void buildAmbient(LinearLayout box) {
         Ambient.Settings a = prefs.ambient;
         roomControls(box);
@@ -341,12 +350,16 @@ public class MainActivity extends Activity implements SyncState.Listener {
             a.animation = k;
             prefs.saveAmbient();
             ambAnimBtn.setText(Ambient.NAMES[k] + "  ▸");
+            showAmbientColors();
+            rebuildHue();
             rebuildStrips();
+            rebuildDmx();
             refresh();
         }));
         box.addView(ambAnimBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
 
-        box.addView(section("Colors"));
+        ambColorsLabel = section("Colors");
+        box.addView(ambColorsLabel);
         ambPaletteBox = Ui.column(this);
         box.addView(ambPaletteBox);
         rebuildAmbientPalettes();
@@ -359,6 +372,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
 
         }));
         box.addView(ambColorBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 10), 0, 0));
+        showAmbientColors();
 
         box.addView(section("Speed"));
         box.addView(Ui.slider(this, a.speed, v -> {
@@ -821,9 +835,26 @@ public class MainActivity extends Activity implements SyncState.Listener {
         prefs.saveHueLamps(hueList);
     }
 
+    /**
+     * Just lights: shows the color button and the palette only when the animation (the device's own,
+     * or the global one it follows) uses them.
+     */
+    private void ambVisibility(View colBtn, View palBox, int ownEffect) {
+        int eff = ownEffect < 0 ? prefs.ambient.animation : ownEffect;
+        if (colBtn != null) colBtn.setVisibility(Ambient.usesColor(eff) ? View.VISIBLE : View.GONE);
+        if (palBox != null) palBox.setVisibility(Ambient.usesPalette(eff) ? View.VISIBLE : View.GONE);
+    }
+
+    /** Music: a solid color or "Off" doesn't use a palette. */
+    private static boolean fxUsesPalette(int fx) {
+        return fx != app.huebeat.core.Dmx.FX_SOLID && fx != app.huebeat.core.Dmx.FX_SOLID_PULSE && fx != app.huebeat.core.Dmx.FX_OFF;
+    }
+
     /** The look controls of a Hue lamp card (or a group card: they set every member). */
     private void buildHueBody(LinearLayout body, HueLamp h, boolean group, TextView title) {
         final boolean amb = ambientMode();
+        final Runnable[] vis = new Runnable[1];
+        final View[] colView = new View[1];
         if (amb) {
             body.addView(Ui.label(this, "Animation"));
             TextView animBtn = pickerButton((h.ambientEffect < 0 ? "Global" : Ambient.NAMES[h.ambientEffect]) + "  ▸");
@@ -833,6 +864,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         saveHueFrom(h);
                         animBtn.setText((h.ambientEffect < 0 ? "Global" : Ambient.NAMES[h.ambientEffect]) + "  ▸");
                         if (title != null && !group) title.setText(hueTitle(h));
+                        if (vis[0] != null) vis[0].run();
                     }));
             body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
             TextView colBtn = pickerButton("");
@@ -851,6 +883,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 showCol.run();
             }));
             body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            colView[0] = colBtn;
         } else {
             body.addView(Ui.label(this, "Effect"));
             LinearLayout colorBox = Ui.column(this);
@@ -877,14 +910,22 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
                         if (title != null && !group) title.setText(hueTitle(h));
                         showColor.run();
+                        if (vis[0] != null) vis[0].run();
                     }));
             showColor.run();
         }
-        body.addView(Ui.label(this, "Colors"));
-        body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> h.palette, v -> {
+        LinearLayout palBox = Ui.column(this);
+        palBox.addView(Ui.label(this, "Colors"));
+        palBox.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> h.palette, v -> {
             h.palette = v;
             saveHueFrom(h);
         }));
+        body.addView(palBox);
+        vis[0] = () -> {
+            if (amb) ambVisibility(colView[0], palBox, h.ambientEffect);
+            else palBox.setVisibility(fxUsesPalette(h.effect) ? View.VISIBLE : View.GONE);
+        };
+        vis[0].run();
         body.addView(Ui.label(this, "Brightness"));
         body.addView(Ui.slider(this, h.brightness, v -> {
             h.brightness = Math.max(0.02f, v);
@@ -1069,6 +1110,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
     /** The look controls of a strip card; in a group card they set every member. */
     private void buildStripBody(LinearLayout body, Strip st, TextView t) {
         final boolean amb = ambientMode();
+        final Runnable[] vis = new Runnable[1];
+        final View[] colView = new View[1];
         if (amb) {
             body.addView(Ui.label(this, "Animation"));
             TextView animBtn = pickerButton(stripAmbientName(st) + "  ▸");
@@ -1078,6 +1121,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         saveStripsFrom(st);
                         animBtn.setText(stripAmbientName(st) + "  ▸");
                         t.setText(stripTitle(st));
+                        if (vis[0] != null) vis[0].run();
                     }));
             body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
             TextView colBtn = pickerButton("");
@@ -1096,6 +1140,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                 showCol.run();
             }));
             body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+            colView[0] = colBtn;
         } else {
             body.addView(Ui.label(this, "Effect"));
             LinearLayout variantBox = Ui.column(this);
@@ -1127,11 +1172,17 @@ public class MainActivity extends Activity implements SyncState.Listener {
             st.blur = v;
             saveStripsFrom(st);
         }));
-        body.addView(Ui.label(this, "Colors"));
-        body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> st.palette, v -> {
+        LinearLayout palBox = Ui.column(this);
+        palBox.addView(Ui.label(this, "Colors"));
+        palBox.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> st.palette, v -> {
             st.palette = v;
             saveStripsFrom(st);
         }));
+        body.addView(palBox);
+        vis[0] = () -> {
+            if (amb) ambVisibility(colView[0], palBox, st.ambientEffect);
+        };
+        vis[0].run();
         body.addView(Ui.label(this, "Brightness"));
         android.widget.SeekBar ownBright = Ui.slider(this, st.brightness, v -> {
             st.brightness = Math.max(0.03f, v);
@@ -1297,6 +1348,8 @@ public class MainActivity extends Activity implements SyncState.Listener {
     /** The look controls of a DMX light card; for a group ({@code group}) they set every member. */
     private void buildDmxBody(LinearLayout body, DmxLight d, boolean group) {
         final boolean amb = ambientMode();
+        final Runnable[] vis = new Runnable[1];
+        final View[] colView = new View[1];
         final boolean colors = app.huebeat.core.Dmx.hasColor(d.roles);
         if (amb) {
             body.addView(Ui.label(this, "Animation"));
@@ -1306,6 +1359,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         d.ambientEffect = k - 1;
                         saveDmxFrom(d);
                         animBtn.setText(dmxAmbientName(d) + "  ▸");
+                        if (vis[0] != null) vis[0].run();
                     }));
             body.addView(animBtn, Ui.lp(Ui.MATCH, Ui.WRAP));
             if (colors) {
@@ -1325,6 +1379,7 @@ public class MainActivity extends Activity implements SyncState.Listener {
                     showCol.run();
                 }));
                 body.addView(colBtn, Ui.margins(Ui.lp(Ui.MATCH, Ui.WRAP), 0, Ui.dp(this, 8), 0, 0));
+                colView[0] = colBtn;
             }
         } else {
             body.addView(Ui.label(this, "Effect"));
@@ -1351,15 +1406,23 @@ public class MainActivity extends Activity implements SyncState.Listener {
                         saveDmxFrom(d);
                         fxBtn.setText(app.huebeat.core.Dmx.EFFECTS[k] + "  ▸");
                         showColor.run();
+                        if (vis[0] != null) vis[0].run();
                     }));
             showColor.run();
         }
         if (colors) {
-            body.addView(Ui.label(this, "Colors"));
-            body.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> d.palette, v -> {
+            LinearLayout palBox = Ui.column(this);
+            palBox.addView(Ui.label(this, "Colors"));
+            palBox.addView(paletteRow(true, amb ? prefs.ambient.palette : prefs.light.palette, () -> d.palette, v -> {
                 d.palette = v;
                 saveDmxFrom(d);
             }));
+            body.addView(palBox);
+            vis[0] = () -> {
+                if (amb) ambVisibility(colView[0], palBox, d.ambientEffect);
+                else palBox.setVisibility(fxUsesPalette(d.effect) ? View.VISIBLE : View.GONE);
+            };
+            vis[0].run();
         }
         body.addView(Ui.label(this, "Brightness"));
         body.addView(Ui.slider(this, d.brightness, v -> {

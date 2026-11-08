@@ -20,6 +20,16 @@ public final class Ambient {
     public static final String[] CATEGORIES = {"Colors", "Colors", "LedFx", "LedFx", "LedFx", "LedFx",
             "LedFx", "LedFx", "Cozy", "Cozy", "Calm", "Calm", "Calm", "Nature", "Nature", "Lively", "Lively", "Lively"};
 
+    /** Whether an animation uses the color (main or own color). */
+    public static boolean usesColor(int a) {
+        return a == STATIC || a == SINGLE || a == RANDOM_FLASH || a == PIXELS || a == BREATHING;
+    }
+
+    /** Whether an animation uses the palette (Breathing: the color, or a palette when one is picked). */
+    public static boolean usesPalette(int a) {
+        return a != STATIC && a != SINGLE && a != RANDOM_FLASH && a != PIXELS && a != RAINBOW && a != STORM;
+    }
+
     /** Settings (may change live). */
     public static final class Settings {
         public volatile int animation = PALETTE;
