@@ -172,7 +172,7 @@ public final class Prefs {
 
     public int appMode() { return sp.getInt("app_mode", APP_MUSIC); }
     public void setAppMode(int m) { sp.edit().putInt("app_mode", m).apply(); }
-    public boolean keepColors() { return sp.getBoolean("keep_colors", true); }
+    public boolean keepColors() { return sp.getBoolean("keep_colors", false); }
     public void setKeepColors(boolean k) { sp.edit().putBoolean("keep_colors", k).apply(); }
 
     /** Cached Hue light names per channel (from the bridge), as "id=name" lines. */

@@ -104,6 +104,7 @@ final class HueLink {
                 connected = true;
                 wait = 3000;
                 setProblem("");
+                lampsOn();
                 darkenSwitchedOff();
                 long again = System.currentTimeMillis() + 3000; // once more, in case the old stream ended late
                 int failures = 0;
@@ -149,6 +150,17 @@ final class HueLink {
             try {
                 HueApi.setStreaming(ip, user, area, false);
             } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** Lamps switched off by the last stop: on again, so they show the stream. */
+    private void lampsOn() {
+        for (HueLamp h : lamps) {
+            if (h.lightId.isEmpty()) continue;
+            try {
+                HueApi.setLightOn(ip, user, h.lightId, true);
+            } catch (IOException ignored) {
             }
         }
     }

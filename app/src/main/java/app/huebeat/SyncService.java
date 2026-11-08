@@ -209,6 +209,7 @@ public class SyncService extends Service {
             // the bridge connects on its own thread: an unreachable bridge doesn't hold up the rest
             if (hue) link = new HueLink(prefs, hueLamps, SyncState::notifyListeners);
             stripSock = new DatagramSocket();
+            stripsOn(rig);
 
             rec = createRecorder(mode, mp, prefs);
             final AudioRecord frec = rec;
@@ -512,6 +513,7 @@ public class SyncService extends Service {
                 }
                 rec.release();
             }
+            lightsOffSoon(prefs, rig);
         }
     }
 
@@ -534,6 +536,7 @@ public class SyncService extends Service {
             rig.update(prefs);
             if (rig.isEmpty() && !hue && !SyncState.phoneShow) throw new IOException("Add Hue lamps, an LED strip or a DMX light first.");
             stripSock = new DatagramSocket();
+            stripsOn(rig);
             if (hue) link = new HueLink(prefs, hueLamps, SyncState::notifyListeners);
             Ambient.Settings as = prefs.ambient;
             SyncState.meter = 0f;
@@ -582,10 +585,72 @@ public class SyncService extends Service {
             SyncState.problem = "";
             if (link != null) link.close();
             if (finished && prefs.keepColors()) keepColors(ip, user, rig);
-            else rig.blackoutDmx(stripSock); // DMX nodes hold the last frame: that already keeps the colors
+            else {
+                rig.blackoutDmx(stripSock);
+                lightsOffSoon(prefs, rig);
+            }
             if (stripSock != null) stripSock.close();
             Ambient.master = null;
         }
+    }
+
+    /** Strips that were switched off at the last stop: on again (WLED shows the stream only when on). */
+    private static void stripsOn(Rig rig) {
+        final List<String> hosts = new ArrayList<>();
+        for (StripOutput so : rig.strips) hosts.add(so.host());
+        new Thread(() -> {
+            for (String h : hosts) {
+                try {
+                    WledApi.setOn(h, true);
+                } catch (Exception ignored) {
+                    // not WLED, or not reachable
+                }
+            }
+        }, "strips-on").start();
+    }
+
+    /**
+     * Turned off: every light goes dark (Hue lamps off, strips black and WLED off; DMX is already
+     * blacked out). Waits a moment first: when the sync only restarts (a setting changed), it's
+     * running again by then and nothing is switched off.
+     */
+    private static void lightsOffSoon(Prefs prefs, Rig rig) {
+        final String ip = prefs.bridgeIp(), user = prefs.username();
+        final List<String> lamps = new ArrayList<>();
+        if (prefs.isPaired()) for (HueLamp h : Rig.streamedLamps(prefs)) if (!h.lightId.isEmpty()) lamps.add(h.lightId);
+        final List<StripOutput> strips = new ArrayList<>(rig.strips);
+        new Thread(() -> {
+            try {
+                Thread.sleep(1500);
+            } catch (InterruptedException e) {
+                return;
+            }
+            if (SyncState.isActive()) return;
+            try (DatagramSocket sock = new DatagramSocket()) {
+                for (StripOutput so : strips) {
+                    float[] black = so.fill(new float[3]);
+                    for (int k = 0; k < 3; k++) {
+                        try {
+                            so.send(sock, black);
+                        } catch (IOException ignored) {
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            for (StripOutput so : strips) {
+                try {
+                    WledApi.setOn(so.host(), false);
+                } catch (Exception ignored) {
+                }
+            }
+            for (String id : lamps) {
+                try {
+                    HueApi.setLightOn(ip, user, id, false);
+                } catch (Exception ignored) {
+                }
+            }
+        }, "lights-off").start();
     }
 
     /** Camera layout: where each room point sits in the camera picture, plus the output buffer. */
